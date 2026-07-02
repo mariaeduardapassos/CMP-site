@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CMP Vistorias</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- LOGIN OVERLAY -->
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+      <div class="login-logo">
+        <img src="Logo - CMP.jpeg" alt="CMP">
+        <div class="login-logo-title">CMP Vistorias</div>
+        <div class="login-logo-sub">Construtora Marcelino Porto</div>
+      </div>
+      <div class="login-error" id="loginError" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label">Usuário</label>
+        <input class="form-control" id="loginUser" type="text" placeholder="Digite seu usuário" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Senha</label>
+        <input class="form-control" id="loginPass" type="password" placeholder="Digite sua senha" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px" onclick="doLogin()">
+        Entrar
+      </button>
+      <div class="login-footer">Pressione Enter para acessar</div>
+    </div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <img src="Logo - CMP.jpeg" alt="CMP Logo" class="logo-img">
+      <div>
+        <div class="logo-title">CMP Vistorias</div>
+        <div class="logo-sub">Construtora Marcelino Porto</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a href="#dashboard" class="nav-item" data-page="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        Dashboard
+      </a>
+      <a href="#vistorias" class="nav-item" data-page="vistorias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+        </svg>
+        Vistorias
+      </a>
+      <a href="#fiscais" class="nav-item" data-page="fiscais">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+        </svg>
+        Fiscais
+      </a>
+      <a href="#importar" class="nav-item" data-page="importar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Importar Ciclo
+      </a>
+    </nav>
+
+    <div style="padding:12px 16px;border-top:1px solid #2e2e2e">
+      <button class="btn btn-secondary btn-sm" style="width:100%;justify-content:center" onclick="doLogout()">
+        Sair
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main-wrapper">
+    <header class="header">
+      <button class="menu-toggle" id="menuToggle" aria-label="Menu">&#9776;</button>
+      <span class="header-title" id="headerTitle">Dashboard</span>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+
+  <!-- DRAWER (edit vistoria) -->
+  <div class="drawer-overlay" id="drawerOverlay"></div>
+  <div class="drawer drawer-wide" id="editDrawer"></div>
+
+  <!-- MODAL (add/edit fiscal) -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/importer.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/maps.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
