@@ -13,31 +13,117 @@ function importExcel(file, cicloNome) {
   })
 }
 
-function processWorkbook(wb, cicloNome) {
-  const geralName = wb.SheetNames.find(n => n.toLowerCase().includes('geral')) || wb.SheetNames[0]
-  if (!geralName) throw new Error('Aba "Geral" não encontrada na planilha')
+// ─── LOCALIZAÇÃO DA TABELA DE OBRAS DENTRO DA ABA ───────────
+// A planilha real vem com um bloco de observações + uma tabela de resumo por UF
+// antes da tabela de obras propriamente dita, tudo na mesma aba. Por isso não dá
+// para assumir que o cabeçalho está na linha 1: é preciso procurar a linha que
+// contém as colunas "ID" e "Obra" (ou "Situação da Obra") e tratar essa linha
+// como cabeçalho, ignorando tudo antes dela.
+const OBRAS_HEADER_MARKERS = ['id', 'obra']
 
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[geralName], { defval: '' })
+function findObrasSheet(wb) {
+  for (const name of wb.SheetNames) {
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '', blankrows: false })
+    const headerRowIdx = findHeaderRowIndex(aoa)
+    if (headerRowIdx >= 0) return { name, aoa, headerRowIdx }
+  }
+  return null
+}
+
+function findHeaderRowIndex(aoa) {
+  for (let i = 0; i < aoa.length; i++) {
+    const row = aoa[i].map(c => String(c || '').trim().toLowerCase())
+    const hasAll = OBRAS_HEADER_MARKERS.every(marker => row.includes(marker))
+    if (hasAll) return i
+  }
+  return -1
+}
+
+function rowsFromHeaderIndex(aoa, headerRowIdx) {
+  const headers = aoa[headerRowIdx].map(h => String(h || '').trim())
+  const rows = []
+  for (let i = headerRowIdx + 1; i < aoa.length; i++) {
+    const raw = aoa[i]
+    if (!raw || raw.every(c => String(c || '').trim() === '')) continue
+    const obj = {}
+    headers.forEach((h, idx) => { if (h) obj[h] = raw[idx] !== undefined ? raw[idx] : '' })
+    rows.push(obj)
+  }
+  return rows
+}
+
+// ─── LIMPEZA DE TEXTO ────────────────────────────────────────
+function cleanEscolaNome(obraRaw, id, municipio, uf) {
+  let s = String(obraRaw || '').trim()
+  s = s.replace(/<\/?a[^>]*>/gi, '').trim() // remove tags soltas tipo </a> (resíduo de export)
+  const prefix = `(${id}) `
+  if (s.startsWith(prefix)) s = s.slice(prefix.length)
+  if (municipio && uf) {
+    const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const suffixRe = new RegExp(`\\s*[-/]\\s*${escapeRe(municipio)}\\s*[-/]\\s*${escapeRe(uf)}\\s*$`, 'i')
+    s = s.replace(suffixRe, '')
+  }
+  return s.trim()
+}
+
+// ─── ESFERA (derivada da Unidade Implantadora, que não tem coluna própria) ──
+function classificarEsfera(unidade) {
+  const u = String(unidade || '').toUpperCase()
+  if (!u) return ''
+  if (/^PREF(EITURA)?\s*MUN/.test(u)) return 'Municipal'
+  if (/ESTADUAL|ESTADO|SEE[- ]|SECITEC/.test(u)) return 'Estadual'
+  if (/FEDERAL|\bMEC\b|\bFNDE\b/.test(u)) return 'Federal'
+  return ''
+}
+
+// ─── COORDENADAS: "8.34.33.S" (graus.minutos.segundos.direção) → decimal ────
+function dmsParaDecimal(valor) {
+  const s = String(valor || '').trim()
+  const m = s.match(/^(\d+)\.(\d+)\.(\d+)\.?\s*([NSEW])$/i)
+  if (!m) return ''
+  const [, deg, min, sec, dir] = m
+  let dec = Number(deg) + Number(min) / 60 + Number(sec) / 3600
+  if (/[SW]/i.test(dir)) dec = -dec
+  return dec.toFixed(4)
+}
+
+function coordenadaFromLatLon(lat, lon) {
+  const latDec = dmsParaDecimal(lat)
+  const lonDec = dmsParaDecimal(lon)
+  if (!latDec || !lonDec) return ''
+  return `${latDec}, ${lonDec}`
+}
+
+// ─── IMPORTAÇÃO PRINCIPAL ────────────────────────────────────
+function processWorkbook(wb, cicloNome) {
+  const found = findObrasSheet(wb)
+  if (!found) throw new Error('Não encontrei a tabela de obras na planilha (procurei uma linha de cabeçalho com colunas "ID" e "Obra").')
+
+  const rows = rowsFromHeaderIndex(found.aoa, found.headerRowIdx)
   const vistorias = DB.getVistorias()
-  let novas = 0, atualizadas = 0
+  let novas = 0, atualizadas = 0, ignoradas = 0
 
   for (const row of rows) {
-    const id = String(row['ID DA OBRA'] || '').trim()
+    const id = String(row['ID'] || '').trim()
     if (!id || id === '0') continue
+
+    const removerDaLista = String(row['REMOVER DA LISTA'] || '').trim().toUpperCase()
+    if (removerDaLista === 'X') { ignoradas++; continue }
+
+    const municipio = String(row['Município'] || '').trim()
+    const uf = String(row['UF'] || '').trim()
+    const unidade = String(row['Unidade Implantadora'] || '').trim()
 
     const baseData = {
       id_obra: id,
-      uf: String(row['UF'] || '').trim(),
-      quem: String(row['Quem'] || '').trim(),
-      esfera: String(row['ESFERA'] || '').trim(),
-      municipio: String(row['MUNICÍPIO'] || '').trim(),
-      tipologia: String(row['TIPOLOGIA DA OBRA'] || '').trim(),
-      situacao: String(row['SITUAÇÃO'] || '').trim(),
-      coordenada: String(row['COORDENADA'] || '').trim(),
-      escola: String(row['ESCOLA'] || '').trim(),
-      fiscal: String(row['FISCAIS'] || '').trim(),
-      valor: String(row['VALOR'] || '').trim(),
-      situacao_os: String(row['SITUAÇÃO DA OS'] || '').trim(),
+      uf,
+      quem: unidade,
+      esfera: classificarEsfera(unidade),
+      municipio,
+      tipologia: String(row['Tipologia'] || '').trim(),
+      situacao: String(row['Situação da Obra'] || '').trim(),
+      coordenada: coordenadaFromLatLon(row['Latitude'], row['Longitude']),
+      escola: cleanEscolaNome(row['Obra'], id, municipio, uf),
     }
 
     const existing = vistorias[id]
@@ -45,9 +131,17 @@ function processWorkbook(wb, cicloNome) {
       vistorias[id] = {
         ...existing,
         ...baseData,
-        foto: existing.foto || String(row['FOTO'] || '').trim(),
-        ata: existing.ata || String(row['ATA'] || '').trim(),
-        observacao: existing.observacao || String(row['OBSERVAÇÃO'] || '').trim(),
+        fiscal: existing.fiscal || '',
+        valor: existing.valor || '',
+        situacao_os: existing.situacao_os || '',
+        foto: existing.foto || '',
+        ata: existing.ata || '',
+        observacao: existing.observacao || '',
+        memorial_calculo: existing.memorial_calculo || '',
+        vistoriador: existing.vistoriador || '',
+        obs_lancamento: existing.obs_lancamento || '',
+        obs_simec: existing.obs_simec || '',
+        status_pagamento: existing.status_pagamento || '',
         ciclos: [...new Set([...(existing.ciclos || []), cicloNome])],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }
@@ -55,9 +149,17 @@ function processWorkbook(wb, cicloNome) {
     } else {
       vistorias[id] = {
         ...baseData,
-        foto: String(row['FOTO'] || '').trim(),
-        ata: String(row['ATA'] || '').trim(),
-        observacao: String(row['OBSERVAÇÃO'] || '').trim(),
+        fiscal: '',
+        valor: '',
+        situacao_os: '',
+        foto: '',
+        ata: '',
+        observacao: '',
+        memorial_calculo: '',
+        vistoriador: '',
+        obs_lancamento: '',
+        obs_simec: '',
+        status_pagamento: '',
         ciclos: [cicloNome],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }
@@ -77,7 +179,7 @@ function processWorkbook(wb, cicloNome) {
     total: novas + atualizadas
   })
 
-  // Process Fiscais sheet if present
+  // Aba de Fiscais, se existir (a planilha de obras normalmente não traz uma)
   const fiscaisResult = { importados: 0, atualizados: 0 }
   const fiscaisName = wb.SheetNames.find(n => n.toLowerCase().includes('fiscal'))
   if (fiscaisName) {
@@ -86,7 +188,7 @@ function processWorkbook(wb, cicloNome) {
     fiscaisResult.atualizados = r.atualizados
   }
 
-  return { novas, atualizadas, fiscaisImportados: fiscaisResult.importados, total: novas + atualizadas }
+  return { novas, atualizadas, ignoradas, fiscaisImportados: fiscaisResult.importados, total: novas + atualizadas }
 }
 
 // ─── FISCAIS MERGE (shared by processWorkbook + importFiscaisOnly) ──
@@ -180,9 +282,25 @@ function previewExcel(file, maxRows = 5) {
       try {
         const data = new Uint8Array(e.target.result)
         const wb = XLSX.read(data, { type: 'array' })
-        const name = wb.SheetNames.find(n => n.toLowerCase().includes('geral')) || wb.SheetNames[0]
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' })
-        resolve({ headers: rows.length ? Object.keys(rows[0]) : [], rows: rows.slice(0, maxRows), total: rows.length })
+        const found = findObrasSheet(wb)
+        if (!found) throw new Error('Não encontrei a tabela de obras na planilha.')
+        const rows = rowsFromHeaderIndex(found.aoa, found.headerRowIdx)
+        const preview = rows.slice(0, maxRows).map(row => {
+          const id = String(row['ID'] || '').trim()
+          const municipio = String(row['Município'] || '').trim()
+          const uf = String(row['UF'] || '').trim()
+          const unidade = String(row['Unidade Implantadora'] || '').trim()
+          return {
+            'ID DA OBRA': id,
+            'UF': uf,
+            'MUNICÍPIO': municipio,
+            'ESCOLA': cleanEscolaNome(row['Obra'], id, municipio, uf),
+            'ESFERA': classificarEsfera(unidade),
+            'SITUAÇÃO': String(row['Situação da Obra'] || '').trim(),
+            'REMOVER DA LISTA': String(row['REMOVER DA LISTA'] || '').trim(),
+          }
+        })
+        resolve({ headers: preview.length ? Object.keys(preview[0]) : [], rows: preview, total: rows.length })
       } catch (err) { reject(err) }
     }
     reader.onerror = () => reject(new Error('Falha ao ler o arquivo'))

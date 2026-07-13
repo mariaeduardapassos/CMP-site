@@ -43,11 +43,10 @@ function destroyChart(id) {
   if (CHARTS[id]) { CHARTS[id].destroy(); delete CHARTS[id] }
 }
 
-// ─── FUNNEL CIRCULAR (large donut with center text) ─────────
-function renderFunnelChart(canvasId, cicloId) {
-  destroyChart(canvasId)
-  const canvas = document.getElementById(canvasId)
-  if (!canvas) return
+// ─── FUNIL SOBREPOSTO (bandas empilhadas, cada uma mais estreita que a anterior) ──
+function renderFunnelChart(containerId, cicloId) {
+  const container = document.getElementById(containerId)
+  if (!container) return
 
   const data = getVistoriasByFilter(cicloId)
   const counts = {}
@@ -59,106 +58,32 @@ function renderFunnelChart(canvasId, cicloId) {
   const labels = [...orderedLabels, ...otherLabels]
   const values = labels.map(l => counts[l])
   const total = values.reduce((a,b) => a+b, 0)
+  const maxVal = Math.max(...values, 1)
 
-  // Center text plugin
-  const centerTextPlugin = {
-    id: 'centerText',
-    afterDraw(chart) {
-      const { ctx, chartArea } = chart
-      if (!chartArea) return
-      const cx = (chartArea.left + chartArea.right) / 2
-      const cy = (chartArea.top + chartArea.bottom) / 2
-
-      const active = chart._active && chart._active.length > 0
-        ? chart._active[0]
-        : null
-
-      ctx.save()
-      if (active !== null) {
-        const idx = active.index
-        const label = chart.data.labels[idx]
-        const val = chart.data.datasets[0].data[idx]
-        const pct = total > 0 ? Math.round(val/total*100) : 0
-
-        ctx.fillStyle = '#1a1a1a'
-        ctx.font = 'bold 28px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(val, cx, cy - 18)
-
-        ctx.font = 'bold 11px sans-serif'
-        ctx.fillStyle = STATUS_COLORS[label] || '#6b7280'
-        ctx.fillText(pct + '%', cx, cy + 8)
-
-        // Wrap label
-        ctx.font = '10px sans-serif'
-        ctx.fillStyle = '#6b7280'
-        const maxW = 90
-        const words = label.split(' ')
-        let line = ''
-        const lines = []
-        words.forEach(w => {
-          const test = line + (line ? ' ' : '') + w
-          if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w }
-          else line = test
-        })
-        if (line) lines.push(line)
-        lines.forEach((l, i) => ctx.fillText(l, cx, cy + 24 + i * 13))
-      } else {
-        ctx.fillStyle = '#1a1a1a'
-        ctx.font = 'bold 36px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(total, cx, cy - 10)
-        ctx.font = '12px sans-serif'
-        ctx.fillStyle = '#9ca3af'
-        ctx.fillText('obras', cx, cy + 16)
-      }
-      ctx.restore()
-    }
+  if (labels.length === 0) {
+    container.innerHTML = `<div style="text-align:center;color:#9ca3af;padding:60px 0">Sem dados de Situação da OS</div>`
+    updateFunnelObservation(null, total, 100)
+    return
   }
 
-  CHARTS[canvasId] = new Chart(canvas, {
-    type: 'doughnut',
-    data: {
-      labels,
-      datasets: [{
-        data: values,
-        backgroundColor: labels.map(getStatusColor),
-        borderWidth: 3,
-        borderColor: '#fff',
-        hoverOffset: 10
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '62%',
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const pct = total > 0 ? Math.round(ctx.raw/total*100) : 0
-              return ` ${ctx.raw} obras (${pct}%)`
-            }
-          }
-        }
-      },
-      onHover(_, elements) {
-        if (elements.length > 0) {
-          const idx = elements[0].index
-          const label = labels[idx]
-          const val = values[idx]
-          const pct = total > 0 ? Math.round(val/total*100) : 0
-          updateFunnelObservation(label, val, pct)
-        } else {
-          updateFunnelObservation(null, total, 100)
-        }
-      }
-    },
-    plugins: [centerTextPlugin]
-  })
+  container.innerHTML = `
+    <div class="funnel-total">Total: <strong>${total}</strong> obras</div>
+    <div class="funnel-bands">
+      ${labels.map((label, i) => {
+        const val = values[i]
+        const pct = total > 0 ? Math.round(val/total*100) : 0
+        const widthPct = Math.max(24, Math.round((val/maxVal) * 100))
+        const color = getStatusColor(label)
+        return `
+          <div class="funnel-band" style="width:${widthPct}%;background:${color};margin-top:${i===0?0:-10}px;z-index:${i+1}"
+               onmouseenter="updateFunnelObservation('${esc(label)}',${val},${pct})"
+               onmouseleave="updateFunnelObservation(null,${total},100)"
+               onclick="filterVistoriasByStatus('${esc(label)}')">
+            <span class="funnel-band-label">${esc(label)}</span>
+            <span class="funnel-band-count">${val} · ${pct}%</span>
+          </div>`
+      }).join('')}
+    </div>`
 
   // Initial observation state
   updateFunnelObservation(null, total, 100)
@@ -280,12 +205,18 @@ function renderEsferaChart(canvasId, cicloId) {
   })
 }
 
-// ─── SITUAÇÃO DA OBRA (Execução / Concluída / Paralisada / Não iniciada) ──
+// ─── SITUAÇÃO DA OBRA ─────────────────────────────────────────
 const SITUACAO_COLORS = {
-  'Execução':       '#efbd3f',
-  'Concluída':      '#10b981',
-  'Paralisada':     '#ef4444',
-  'Não iniciada':   '#9ca3af',
+  'Execução':                          '#efbd3f',
+  'Concluída':                         '#10b981',
+  'Paralisada':                        '#ef4444',
+  'Não iniciada':                      '#9ca3af',
+  'Inacabada':                         '#f97316',
+  'Inacabada - PC Técnica Concluída':  '#fb923c',
+  'Licitação':                         '#3b82f6',
+  'Contratação':                       '#6366f1',
+  'Em Reformulação':                   '#a855f7',
+  'Obra Cancelada':                    '#4b5563',
 }
 
 function renderSituacaoChart(canvasId, cicloId) {

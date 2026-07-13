@@ -43,10 +43,60 @@ const DB = {
     this._set('cmp_fiscais', all)
   },
 
+  // DELETE — ciclo (em massa) e ordem/vistoria individual
+  deleteCiclo(cicloId) {
+    const ciclos = this.getCiclos()
+    const ciclo = ciclos.find(c => c.id === cicloId)
+    if (!ciclo) return
+    this._set('cmp_ciclos', ciclos.filter(c => c.id !== cicloId))
+    const vistorias = this.getVistorias()
+    Object.values(vistorias).forEach(v => {
+      if (v.ciclos) v.ciclos = v.ciclos.filter(nome => nome !== ciclo.nome)
+    })
+    this.saveVistorias(vistorias)
+  },
+  deleteVistoria(id) {
+    const all = this.getVistorias()
+    delete all[id]
+    this.saveVistorias(all)
+  },
+
+  // POPS — Procedimentos Operacionais Padrão
+  getPops() { return this._get('cmp_pops', []) },
+  savePops(data) { this._set('cmp_pops', data) },
+  savePop(pop) {
+    const all = this.getPops()
+    if (pop.id) {
+      const idx = all.findIndex(p => p.id === pop.id)
+      if (idx >= 0) all[idx] = pop
+      else all.push(pop)
+    } else {
+      pop.id = Date.now()
+      all.push(pop)
+    }
+    this._set('cmp_pops', all)
+    return pop
+  },
+  deletePop(id) {
+    const all = this.getPops().filter(p => p.id !== id)
+    this._set('cmp_pops', all)
+  },
+
+  // PREÇOS — valor mínimo de vistoria por estado (UF)
+  getPrecos() { return this._get('cmp_precos', {}) },
+  savePrecos(data) { this._set('cmp_precos', data) },
+  savePreco(uf, data) {
+    const all = this.getPrecos()
+    all[uf] = { ...(all[uf]||{}), ...data }
+    this._set('cmp_precos', all)
+  },
+
   clear() {
     localStorage.removeItem('cmp_vistorias')
     localStorage.removeItem('cmp_ciclos')
     localStorage.removeItem('cmp_fiscais')
+    localStorage.removeItem('cmp_pops')
+    localStorage.removeItem('cmp_precos')
   },
 
   // AUTH
