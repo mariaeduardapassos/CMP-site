@@ -72,6 +72,19 @@ const DB = {
     delete all[id]
     this.saveVistorias(all)
   },
+  // Remove vistorias órfãs (sem nenhum ciclo associado) — cobre tanto obras
+  // que ficaram sem ciclo por algum motivo quanto dados deixados para trás
+  // por versões antigas do site, que só desmarcavam o ciclo sem apagar a obra.
+  limparVistoriasOrfas() {
+    const vistorias = this.getVistorias()
+    let removidas = 0
+    Object.keys(vistorias).forEach(id => {
+      const v = vistorias[id]
+      if (!v.ciclos || v.ciclos.length === 0) { delete vistorias[id]; removidas++ }
+    })
+    if (removidas > 0) this.saveVistorias(vistorias)
+    return removidas
+  },
 
   // POPS — Procedimentos Operacionais Padrão
   getPops() { return this._get('cmp_pops', []) },

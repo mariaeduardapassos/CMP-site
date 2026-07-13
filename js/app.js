@@ -24,6 +24,7 @@ function doLogin() {
   const err  = document.getElementById('loginError')
   if (DB.login(user, pass)) {
     document.getElementById('loginOverlay').style.display = 'none'
+    DB.limparVistoriasOrfas()
     const pg = location.hash.replace('#','') || 'dashboard'
     navigate(pg)
   } else {
@@ -1401,6 +1402,7 @@ window.addEventListener('hashchange', () => {
 // INIT
 if (DB.isLoggedIn()) {
   document.getElementById('loginOverlay').style.display = 'none'
+  DB.limparVistoriasOrfas()
   navigate(location.hash.replace('#','') || 'dashboard')
 } else {
   document.getElementById('loginOverlay').style.display = 'flex'
