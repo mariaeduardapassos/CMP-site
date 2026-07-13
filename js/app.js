@@ -383,18 +383,19 @@ function renderVistorias(container) {
     <option value="nao" ${f.ata==='nao'?'selected':''}>— Sem ATA</option>`
 
   const rows = pageData.length === 0
-    ? `<tr><td colspan="16" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
+    ? `<tr><td colspan="17" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
     : pageData.map(v => `
       <tr onclick="openVistoriaDrawer('${esc(v.id_obra)}')">
-        <td><code style="font-size:11px;color:#6b7280">${esc(v.id_obra)}</code></td>
-        <td title="${esc(v.escola)}">${esc(v.escola)||'—'}</td>
-        <td>${esc(v.municipio)||'—'}</td>
         <td><span class="badge badge-default">${esc(v.uf)}</span></td>
+        <td>${esc(v.quem)||'—'}</td>
         <td>${esc(v.esfera)||'—'}</td>
+        <td>${esc(v.municipio)||'—'}</td>
+        <td><code style="font-size:11px;color:#6b7280">${esc(v.id_obra)}</code></td>
         <td title="${esc(v.tipologia)}">${esc(v.tipologia)||'—'}</td>
         <td>${esc(v.situacao)||'—'}</td>
+        <td>${esc(v.coordenada)||'—'}</td>
+        <td title="${esc(v.escola)}">${esc(v.escola)||'—'}</td>
         <td>${esc(v.fiscal)||'—'}</td>
-        <td>${esc(v.quem)||'—'}</td>
         <td>${formatBRL(v.valor)}</td>
         <td>${statusBadge(v.situacao_os)}</td>
         <td>${v.foto ? '✅' : '—'}</td>
@@ -430,9 +431,9 @@ function renderVistorias(container) {
         <table class="table-full">
           <thead>
             <tr>
-              <th>ID Obra</th><th>Escola</th><th>Município</th><th>UF</th>
-              <th>Esfera</th><th>Tipologia</th><th>Situação</th>
-              <th>Fiscal</th><th>Responsável</th><th>Valor</th>
+              <th>UF</th><th>Quem</th><th>Esfera</th><th>Município</th>
+              <th>ID da Obra</th><th>Tipologia da Obra</th><th>Situação</th><th>Coordenada</th>
+              <th>Escola</th><th>Fiscal</th><th>Valor</th>
               <th>Situação OS</th><th>Foto</th><th>ATA</th>
               <th>Observação</th><th>Ciclo(s)</th><th>Atualizado</th>
             </tr>
@@ -1111,12 +1112,14 @@ function renderSimec(container) {
     ALL_SITUACOES.map(s => `<option value="${esc(s)}" ${f.situacao===s?'selected':''}>${esc(s)}</option>`).join('')
 
   const rows = pageData.length === 0
-    ? `<tr><td colspan="10" style="text-align:center;padding:32px;color:#9ca3af">Nenhum registro encontrado</td></tr>`
+    ? `<tr><td colspan="12" style="text-align:center;padding:32px;color:#9ca3af">Nenhum registro encontrado</td></tr>`
     : pageData.map(v => `
       <tr onclick="openSimecDrawer('${esc(v.id_obra)}')">
         <td>${esc(v.uf)||'—'}</td>
+        <td>${esc(v.esfera)||'—'}</td>
         <td>${esc(v.municipio)||'—'}</td>
         <td><code style="font-size:11px;color:#6b7280">${esc(v.id_obra)}</code></td>
+        <td title="${esc(v.escola)}">${esc(v.escola)||'—'}</td>
         <td title="${esc(v.tipologia)}">${esc(v.tipologia)||'—'}</td>
         <td>${esc(v.situacao)||'—'}</td>
         <td>${v.foto ? '✅' : '—'}</td>
@@ -1143,7 +1146,7 @@ function renderSimec(container) {
         <table class="table-full">
           <thead>
             <tr>
-              <th>UF</th><th>Município</th><th>ID Obra</th><th>Tipologia</th><th>Situação</th>
+              <th>UF</th><th>Esfera</th><th>Município</th><th>ID da Obra</th><th>Escola</th><th>Tipologia da Obra</th><th>Situação</th>
               <th>Foto</th><th>ATA</th><th>Memorial de Cálculo</th><th>Vistoriador</th><th>Obs. CMP</th>
             </tr>
           </thead>
