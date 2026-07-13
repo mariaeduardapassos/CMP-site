@@ -178,16 +178,16 @@ function toggleDocField(field) {
   }
 }
 
-// ─── SELECT INLINE PARA FOTO/ATA/MEMORIAL DE CÁLCULO NA TABELA ──
-// Mesmo padrão do select de Status de Pagamento em Pagamento de Fiscais:
-// muda o valor direto na tabela, sem precisar abrir o drawer.
+// ─── TOGGLE INLINE PARA FOTO/ATA/MEMORIAL DE CÁLCULO NA TABELA ──
+// Mostra só o emoji verde ou o "—", clicável para marcar/desmarcar direto
+// na tabela, sem precisar abrir o drawer.
 function docFieldSelectCell(id, field, value, page) {
   const lbl = DOC_FIELD_LABELS[field] || { on: 'Registrado' }
   return `<td onclick="event.stopPropagation()">
-    <select class="filter-select" style="min-width:150px" onchange="setDocFieldInline('${esc(id)}','${field}',this.value,'${page}')">
-      <option value="" ${!value?'selected':''}>— Não registrado</option>
-      <option value="sim" ${value?'selected':''}>✅ ${lbl.on}</option>
-    </select>
+    <button type="button" class="doc-toggle-mini" title="${value ? 'Clique para desmarcar' : `Clique para marcar ${lbl.on}`}"
+            onclick="setDocFieldInline('${esc(id)}','${field}','${value?'':'sim'}','${page}')">
+      ${value ? '✅' : '—'}
+    </button>
   </td>`
 }
 

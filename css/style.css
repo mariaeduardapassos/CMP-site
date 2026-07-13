@@ -870,6 +870,18 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .doc-toggle.doc-on:hover { border-color: #059669; }
 .doc-toggle-icon { font-size: 18px; }
 
+.doc-toggle-mini {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+.doc-toggle-mini:hover { background: #f3f4f6; }
+
 /* ─── FULL TABLE (all columns) ──────────────────────────── */
 .table-full { font-size: 12px; }
 .table-full thead th { font-size: 10px; padding: 8px 10px; white-space: nowrap; }
