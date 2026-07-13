@@ -178,6 +178,31 @@ function toggleDocField(field) {
   }
 }
 
+// ─── SELECT INLINE PARA FOTO/ATA/MEMORIAL DE CÁLCULO NA TABELA ──
+// Mesmo padrão do select de Status de Pagamento em Pagamento de Fiscais:
+// muda o valor direto na tabela, sem precisar abrir o drawer.
+function docFieldSelectCell(id, field, value, page) {
+  const lbl = DOC_FIELD_LABELS[field] || { on: 'Registrado' }
+  return `<td onclick="event.stopPropagation()">
+    <select class="filter-select" style="min-width:150px" onchange="setDocFieldInline('${esc(id)}','${field}',this.value,'${page}')">
+      <option value="" ${!value?'selected':''}>— Não registrado</option>
+      <option value="sim" ${value?'selected':''}>✅ ${lbl.on}</option>
+    </select>
+  </td>`
+}
+
+function setDocFieldInline(id, field, value, page) {
+  const v = DB.getVistoria(id)
+  if (!v) return
+  v[field] = value
+  v.ultima_atualizacao = new Date().toISOString().split('T')[0]
+  DB.saveVistoria(id, v)
+  const lbl = DOC_FIELD_LABELS[field]
+  toast(`${lbl ? lbl.on.replace(' registrada','').replace(' registrado','') : field} ${value ? 'marcado' : 'desmarcado'}.`)
+  if (page === 'vistorias') renderVistorias(document.getElementById('content'))
+  else if (page === 'simec') renderSimec(document.getElementById('content'))
+}
+
 function statusOptions(current) {
   return ['', ...ALL_STATUSES]
     .map(s => `<option value="${esc(s)}" ${current===s?'selected':''}>${s||'— Sem status —'}</option>`).join('')
@@ -398,8 +423,8 @@ function renderVistorias(container) {
         <td>${esc(v.fiscal)||'—'}</td>
         <td>${formatBRL(v.valor)}</td>
         <td>${statusBadge(v.situacao_os)}</td>
-        <td>${v.foto ? '✅' : '—'}</td>
-        <td>${v.ata ? '✅' : '—'}</td>
+        ${docFieldSelectCell(v.id_obra, 'foto', v.foto, 'vistorias')}
+        ${docFieldSelectCell(v.id_obra, 'ata', v.ata, 'vistorias')}
         <td title="${esc(v.observacao)}">${v.observacao ? esc(v.observacao).substring(0,30)+'…' : '—'}</td>
         <td>${(v.ciclos||[]).map(c=>`<span class="cycle-badge">${esc(c)}</span>`).join(' ')}</td>
         <td>${esc(v.ultima_atualizacao)||'—'}</td>
@@ -1122,9 +1147,9 @@ function renderSimec(container) {
         <td title="${esc(v.escola)}">${esc(v.escola)||'—'}</td>
         <td title="${esc(v.tipologia)}">${esc(v.tipologia)||'—'}</td>
         <td>${esc(v.situacao)||'—'}</td>
-        <td>${v.foto ? '✅' : '—'}</td>
-        <td>${v.ata ? '✅' : '—'}</td>
-        <td>${v.memorial_calculo ? '✅' : '—'}</td>
+        ${docFieldSelectCell(v.id_obra, 'foto', v.foto, 'simec')}
+        ${docFieldSelectCell(v.id_obra, 'ata', v.ata, 'simec')}
+        ${docFieldSelectCell(v.id_obra, 'memorial_calculo', v.memorial_calculo, 'simec')}
         <td>${esc(v.vistoriador)||'—'}</td>
         <td title="${esc(v.obs_simec)}">${v.obs_simec ? esc(v.obs_simec).substring(0,30)+'…' : '—'}</td>
       </tr>`).join('')
