@@ -19,16 +19,35 @@ const STATE = {
 // ============================================================
 // AUTH
 // ============================================================
+function showGlobalLoading(text) {
+  const el = document.getElementById('loadingOverlay')
+  if (!el) return
+  document.getElementById('loadingText').textContent = text || 'Carregando...'
+  el.style.display = 'flex'
+}
+function hideGlobalLoading() {
+  const el = document.getElementById('loadingOverlay')
+  if (el) el.style.display = 'none'
+}
+
+async function iniciarAposLogin() {
+  showGlobalLoading('Carregando dados...')
+  DB.onRemoteChange(() => { renderPage(); updateNotifyBadge() })
+  await DB.init()
+  hideGlobalLoading()
+  DB.limparVistoriasOrfas()
+  const pg = location.hash.replace('#','') || 'dashboard'
+  navigate(pg)
+  notifyPrazoSummary()
+}
+
 function doLogin() {
   const user = document.getElementById('loginUser').value
   const pass = document.getElementById('loginPass').value
   const err  = document.getElementById('loginError')
   if (DB.login(user, pass)) {
     document.getElementById('loginOverlay').style.display = 'none'
-    DB.limparVistoriasOrfas()
-    const pg = location.hash.replace('#','') || 'dashboard'
-    navigate(pg)
-    notifyPrazoSummary()
+    iniciarAposLogin()
   } else {
     err.textContent = 'Usuário ou senha incorretos.'
     err.style.display = 'block'
@@ -1981,9 +2000,7 @@ window.addEventListener('hashchange', () => {
 // INIT
 if (DB.isLoggedIn()) {
   document.getElementById('loginOverlay').style.display = 'none'
-  DB.limparVistoriasOrfas()
-  navigate(location.hash.replace('#','') || 'dashboard')
-  notifyPrazoSummary()
+  iniciarAposLogin()
 } else {
   document.getElementById('loginOverlay').style.display = 'flex'
   setTimeout(() => document.getElementById('loginUser').focus(), 100)
