@@ -44,16 +44,28 @@ const DB = {
   },
 
   // DELETE — ciclo (em massa) e ordem/vistoria individual
+  // Apaga o ciclo e todo o histórico ligado só a ele: obras que existiam
+  // apenas por causa desse ciclo são removidas por completo (o que também
+  // as some do Dashboard, SIMEC e Pagamento de Fiscais, já que essas telas
+  // leem o mesmo registro de vistoria). Obras que também pertencem a outro
+  // ciclo continuam existindo, só perdem a marcação desse ciclo específico.
   deleteCiclo(cicloId) {
     const ciclos = this.getCiclos()
     const ciclo = ciclos.find(c => c.id === cicloId)
-    if (!ciclo) return
+    if (!ciclo) return { removidas: 0, desmarcadas: 0 }
     this._set('cmp_ciclos', ciclos.filter(c => c.id !== cicloId))
+
     const vistorias = this.getVistorias()
-    Object.values(vistorias).forEach(v => {
-      if (v.ciclos) v.ciclos = v.ciclos.filter(nome => nome !== ciclo.nome)
+    let removidas = 0, desmarcadas = 0
+    Object.keys(vistorias).forEach(id => {
+      const v = vistorias[id]
+      if (!v.ciclos || !v.ciclos.includes(ciclo.nome)) return
+      v.ciclos = v.ciclos.filter(nome => nome !== ciclo.nome)
+      if (v.ciclos.length === 0) { delete vistorias[id]; removidas++ }
+      else desmarcadas++
     })
     this.saveVistorias(vistorias)
+    return { removidas, desmarcadas }
   },
   deleteVistoria(id) {
     const all = this.getVistorias()

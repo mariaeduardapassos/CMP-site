@@ -1014,10 +1014,10 @@ function renderImport(container) {
 }
 
 function confirmDeleteCiclo(cicloId, nome) {
-  if (!confirm(`Excluir o ciclo "${nome}"? As obras importadas nele permanecem cadastradas (com o histórico de outras obras), apenas deixam de estar marcadas com esse ciclo.`)) return
-  DB.deleteCiclo(cicloId)
+  if (!confirm(`Excluir o ciclo "${nome}"? Obras que existem só nesse ciclo serão apagadas por completo (somem do Dashboard, Vistorias, SIMEC e Pagamento de Fiscais). Obras que também pertencem a outro ciclo continuam, só perdem a marcação desse ciclo. Essa ação não pode ser desfeita.`)) return
+  const r = DB.deleteCiclo(cicloId)
   renderImport(document.getElementById('content'))
-  toast('Ciclo excluído.')
+  toast(`Ciclo excluído. ${r.removidas} obra(s) apagada(s) por completo, ${r.desmarcadas} desmarcada(s) (mantidas por pertencer a outro ciclo).`)
 }
 
 async function handleFileSelect(file) {
