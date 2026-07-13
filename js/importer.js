@@ -143,6 +143,7 @@ function processWorkbook(wb, cicloNome, prazoDataInicio) {
         obs_simec: existing.obs_simec || '',
         status_pagamento: existing.status_pagamento || '',
         prazo_data_inicio: existing.prazo_data_inicio || prazoDataInicio || '',
+        etapa_prazo: existing.etapa_prazo || 'Tempo de Organização Extra',
         ciclos: [...new Set([...(existing.ciclos || []), cicloNome])],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }
@@ -163,6 +164,7 @@ function processWorkbook(wb, cicloNome, prazoDataInicio) {
         obs_simec: '',
         status_pagamento: '',
         prazo_data_inicio: prazoDataInicio || '',
+        etapa_prazo: 'Tempo de Organização Extra',
         ciclos: [cicloNome],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }

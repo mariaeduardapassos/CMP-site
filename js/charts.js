@@ -337,3 +337,81 @@ function renderTipologiaChart(canvasId, cicloId) {
     }
   })
 }
+
+// ─── CONTROLE DE PRAZOS: obras por etapa ─────────────────
+function renderPrazoEtapaChart(canvasId) {
+  destroyChart(canvasId)
+  const canvas = document.getElementById(canvasId)
+  if (!canvas) return
+
+  const data = Object.values(DB.getVistorias())
+  const counts = {}
+  ALL_ETAPAS_PRAZO.forEach(e => counts[e] = 0)
+  let semEtapa = 0
+  data.forEach(v => { if (v.etapa_prazo && counts[v.etapa_prazo] !== undefined) counts[v.etapa_prazo]++; else semEtapa++ })
+
+  const labels = [...ALL_ETAPAS_PRAZO]
+  const values = labels.map(l => counts[l])
+  if (semEtapa > 0) { labels.push('Sem etapa definida'); values.push(semEtapa) }
+
+  CHARTS[canvasId] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Obras', data: values, backgroundColor: '#efbd3f', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#f0f0f0' } },
+        y: { grid: { display: false }, ticks: { font: { size: 10.5 } } }
+      }
+    }
+  })
+}
+
+// ─── CONTROLE DE PRAZOS: distribuição por status do prazo ────
+function renderPrazoStatusChart(canvasId) {
+  destroyChart(canvasId)
+  const canvas = document.getElementById(canvasId)
+  if (!canvas) return
+
+  const data = Object.values(DB.getVistorias())
+  const counts = {}
+  data.forEach(v => { const s = getPrazoInfo(v).status; counts[s] = (counts[s]||0) + 1 })
+
+  const order = ['atrasado', 'proximo', 'no_prazo', 'concluido', 'sem_data']
+  const labels = order.filter(k => counts[k] > 0).map(k => PRAZO_LABELS[k].label)
+  const values = order.filter(k => counts[k] > 0).map(k => counts[k])
+  const colorMap = { atrasado: '#ef4444', proximo: '#f97316', no_prazo: '#10b981', concluido: '#6366f1', sem_data: '#9ca3af' }
+  const colors = order.filter(k => counts[k] > 0).map(k => colorMap[k])
+  const total = values.reduce((a,b)=>a+b, 0)
+
+  CHARTS[canvasId] = new Chart(canvas, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#fff', hoverOffset: 6 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '55%',
+      onClick: (evt, elements) => {
+        if (elements.length === 0) return
+        const statusKeys = order.filter(k => counts[k] > 0)
+        const key = statusKeys[elements[0].index]
+        STATE.vistorias.filters.prazo = key
+        STATE.vistorias.page = 1
+        navigate('vistorias')
+      },
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 10, boxWidth: 12 } },
+        tooltip: { callbacks: { label: ctx => {
+          const pct = total > 0 ? Math.round(ctx.raw / total * 100) : 0
+          return ` ${ctx.raw} obras (${pct}%)`
+        }}}
+      }
+    }
+  })
+}

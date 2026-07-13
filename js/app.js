@@ -4,11 +4,12 @@
 const STATE = {
   page: 'dashboard',
   dashCiclo: 'all',
-  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'' }, selected: new Set() },
+  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'', etapa:'' }, selected: new Set() },
   fiscais: { search: '', estado: '', municipio: '' },
   pops: { search: '', area: '' },
   simec: { page: 1, perPage: 20, filters: { uf:'', situacao:'', search:'' }, selected: new Set() },
   pagamentos: { filters: { uf:'', status:'', search:'' }, selected: new Set() },
+  prazos: { calYear: null, calMonth: null, selectedDay: null },
   importFile: null,
   editingVistoriaId: null,
   editingFiscalId: null,
@@ -63,7 +64,8 @@ const PAGE_TITLES = {
   pops:        'POPs',
   simec:       'Controle no SIMEC',
   precos:      'Preços das Vistorias',
-  pagamentos:  'Pagamento de Fiscais'
+  pagamentos:  'Pagamento de Fiscais',
+  prazos:      'Controle de Prazos'
 }
 
 function navigate(page) {
@@ -90,6 +92,7 @@ function renderPage() {
   else if (STATE.page === 'simec')      renderSimec(c)
   else if (STATE.page === 'precos')     renderPrecos(c)
   else if (STATE.page === 'pagamentos') renderPagamentos(c)
+  else if (STATE.page === 'prazos')     renderPrazos(c)
 }
 
 // ============================================================
@@ -109,49 +112,60 @@ const ALL_STATUSES = Object.keys(STATUS_MAP)
 const ALL_SITUACOES = ['Execução', 'Concluída', 'Paralisada', 'Inacabada', 'Inacabada - PC Técnica Concluída', 'Licitação', 'Contratação', 'Em Reformulação', 'Obra Cancelada']
 
 // ─── CONTROLE DE PRAZOS ──────────────────────────────────────
-// Dia-limite (contado a partir da "Data inicial dos prazos" do ciclo) até
-// quando a obra deveria ter SAÍDO daquela Situação da OS. Tempos padrão
-// extraídos da aba "Dias faltando" da planilha de referência (soma dos
-// dias de cada etapa: organização/localização 12 + prospecção 4 = 16;
-// + documentos 3 = 19; + agendamento 2 = 21; + vistoria 6 = 27;
-// + lançamento 2 = 29; + homologação 1 = 30).
-const PRAZO_DIAS_LIMITE = {
-  '':                      16, // sem status definido = tratado como Não Prospectado
-  'NÃO PROSPECTADO':       16,
-  'AGUARDANDO DOCUMENTOS': 19,
-  'EM AGENDAMENTO':        21,
-  'AGUARDANDO VISTORIA':   27,
-  'VISTORIADO':            29,
-  'LANÇADO':               30,
-  // HOMOLOGADO: concluído, sem prazo. DIFICULDADE: exceção, sem prazo fixo.
-}
+// "Status do Prazo" — etapas do cronograma (independentes da Situação da
+// OS), cada uma com um número de dias padrão. O dia-limite de cada etapa
+// é acumulado a partir da "Data inicial dos prazos" escolhida na
+// importação: a obra deveria ter SAÍDO daquela etapa até o dia-limite.
+const ETAPAS_PRAZO = [
+  { key: 'Tempo de Organização Extra', dias: 9 },
+  { key: 'Localização',                dias: 3 },
+  { key: 'Prospectado',                dias: 3 },
+  { key: 'Contratado',                 dias: 3 },
+  { key: 'Agendado',                   dias: 2 },
+  { key: 'Vistoria Realizada',         dias: 6 },
+  { key: 'Lançado',                    dias: 2 },
+  { key: 'Homologado',                 dias: 0 }, // concluído, sem prazo próprio
+]
+const ALL_ETAPAS_PRAZO = ETAPAS_PRAZO.map(e => e.key)
+const PRAZO_DIAS_LIMITE = (() => {
+  let acumulado = 0
+  const map = {}
+  ETAPAS_PRAZO.forEach(e => { acumulado += e.dias; map[e.key] = acumulado })
+  return map
+})()
 const PRAZO_LABELS = {
   atrasado:   { label: 'Atrasado',           cls: 'prazo-atrasado' },
   proximo:    { label: 'Próximo do prazo',   cls: 'prazo-proximo' },
   no_prazo:   { label: 'No prazo',           cls: 'prazo-no-prazo' },
   concluido:  { label: 'Concluído',          cls: 'prazo-concluido' },
-  dificuldade:{ label: 'Com dificuldade',    cls: 'prazo-dificuldade' },
-  sem_data:   { label: 'Sem data inicial',   cls: 'prazo-sem-data' },
+  sem_data:   { label: 'Sem dado(s)',        cls: 'prazo-sem-data' },
+}
+
+function getDataLimite(v) {
+  if (!v.prazo_data_inicio) return null
+  const etapa = v.etapa_prazo || ETAPAS_PRAZO[0].key
+  const limiteDias = PRAZO_DIAS_LIMITE[etapa]
+  if (limiteDias == null) return null
+  const d = new Date(v.prazo_data_inicio + 'T00:00:00')
+  d.setDate(d.getDate() + limiteDias - 1)
+  return d
 }
 
 function getPrazoInfo(v) {
-  if (v.situacao_os === 'HOMOLOGADO') return { status: 'concluido', diasRestantes: null }
-  if (v.situacao_os === 'DIFICULDADE') return { status: 'dificuldade', diasRestantes: null }
-  if (!v.prazo_data_inicio) return { status: 'sem_data', diasRestantes: null }
+  if (v.etapa_prazo === 'Homologado') return { status: 'concluido', diasRestantes: null }
+  if (!v.prazo_data_inicio || !v.etapa_prazo) return { status: 'sem_data', diasRestantes: null }
 
-  const limiteDias = PRAZO_DIAS_LIMITE[v.situacao_os || '']
-  if (limiteDias == null) return { status: 'sem_data', diasRestantes: null }
+  const dataLimite = getDataLimite(v)
+  if (!dataLimite) return { status: 'sem_data', diasRestantes: null }
 
-  const inicio = new Date(v.prazo_data_inicio + 'T00:00:00')
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-  const diasDecorridos = Math.floor((hoje - inicio) / 86400000) + 1
-  const diasRestantes = limiteDias - diasDecorridos
+  const diasRestantes = Math.round((dataLimite - hoje) / 86400000)
 
   let status
   if (diasRestantes < 0) status = 'atrasado'
   else if (diasRestantes <= 3) status = 'proximo'
   else status = 'no_prazo'
-  return { status, diasRestantes, limiteDias, diasDecorridos }
+  return { status, diasRestantes, dataLimite }
 }
 
 function prazoBadge(v) {
@@ -161,6 +175,27 @@ function prazoBadge(v) {
   if (info.status === 'atrasado') texto = `Atrasado (${Math.abs(info.diasRestantes)}d)`
   else if (info.status === 'proximo' || info.status === 'no_prazo') texto = `${info.diasRestantes}d restante(s)`
   return `<span class="badge ${meta.cls}">${esc(texto)}</span>`
+}
+
+// ─── SELECT INLINE PARA "STATUS DO PRAZO" NA TABELA ──────────
+function etapaPrazoSelectCell(v, page) {
+  return `<td onclick="event.stopPropagation()">
+    <select class="filter-select" style="min-width:190px" onchange="setEtapaPrazoInline('${esc(v.id_obra)}',this.value,'${page}')">
+      <option value="" ${!v.etapa_prazo?'selected':''}>— Definir —</option>
+      ${ALL_ETAPAS_PRAZO.map(e => `<option value="${esc(e)}" ${v.etapa_prazo===e?'selected':''}>${esc(e)}</option>`).join('')}
+    </select>
+  </td>`
+}
+
+function setEtapaPrazoInline(id, value, page) {
+  const v = DB.getVistoria(id)
+  if (!v) return
+  v.etapa_prazo = value
+  v.ultima_atualizacao = new Date().toISOString().split('T')[0]
+  DB.saveVistoria(id, v)
+  toast('Status do prazo atualizado.')
+  if (page === 'vistorias') renderVistorias(document.getElementById('content'))
+  else if (page === 'prazos') renderPrazos(document.getElementById('content'))
 }
 
 // ─── NOTIFICAÇÕES DE PRAZO (sino no cabeçalho) ──────────────
@@ -217,7 +252,7 @@ function renderNotifyDropdown() {
     ${alerts.slice(0, 30).map(a => `
       <button class="notify-item" onclick="hideNotifyDropdown();openVistoriaDrawer('${esc(a.v.id_obra)}')">
         <div class="notify-item-title">${esc(a.v.escola) || ('Obra #'+a.v.id_obra)}</div>
-        <div class="notify-item-sub">${esc(a.v.municipio)||'—'}/${esc(a.v.uf)||'—'} · ${esc(a.v.situacao_os)||'sem status'} ·
+        <div class="notify-item-sub">${esc(a.v.municipio)||'—'}/${esc(a.v.uf)||'—'} · ${esc(a.v.etapa_prazo)||'sem etapa'} ·
           ${a.info.status === 'atrasado' ? `atrasado ${Math.abs(a.info.diasRestantes)}d` : `${a.info.diasRestantes}d restante(s)`}</div>
       </button>`).join('')}
     ${alerts.length > 30 ? `<div class="notify-empty">+ ${alerts.length-30} outra(s)</div>` : ''}`
@@ -347,6 +382,7 @@ const BULK_FIELDS = {
     { key: 'fiscal',           label: 'Fiscal',              type: 'text' },
     { key: 'quem',             label: 'Quem',                type: 'text' },
     { key: 'status_pagamento', label: 'Status de Pagamento', type: 'select', options: () => ['Pago','Não Pago','A Negociar'] },
+    { key: 'etapa_prazo',      label: 'Status do Prazo',     type: 'select', options: () => ALL_ETAPAS_PRAZO },
   ],
   simec: [
     { key: 'vistoriador',      label: 'Vistoriador',            type: 'text' },
@@ -620,6 +656,7 @@ function renderVistorias(container) {
   if (f.ata  === 'sim') data = data.filter(v => v.ata)
   if (f.ata  === 'nao') data = data.filter(v => !v.ata)
   if (f.prazo) data = data.filter(v => getPrazoInfo(v).status === f.prazo)
+  if (f.etapa) data = data.filter(v => (v.etapa_prazo||'') === f.etapa)
   if (f.search) {
     const q = f.search.toLowerCase()
     data = data.filter(v =>
@@ -665,12 +702,14 @@ function renderVistorias(container) {
     <option value="nao" ${f.ata==='nao'?'selected':''}>— Sem ATA</option>`
   const prazoOpts = `<option value="">Prazo (todos)</option>` +
     Object.keys(PRAZO_LABELS).map(k => `<option value="${k}" ${f.prazo===k?'selected':''}>${PRAZO_LABELS[k].label}</option>`).join('')
+  const etapaOpts = `<option value="">Status do Prazo (todos)</option>` +
+    ALL_ETAPAS_PRAZO.map(e => `<option value="${esc(e)}" ${f.etapa===e?'selected':''}>${esc(e)}</option>`).join('')
 
   const pageIds = pageData.map(v => v.id_obra)
   const allVisibleSelected = pageIds.length > 0 && pageIds.every(id => STATE.vistorias.selected.has(id))
 
   const rows = pageData.length === 0
-    ? `<tr><td colspan="19" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
+    ? `<tr><td colspan="20" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
     : pageData.map(v => `
       <tr onclick="openVistoriaDrawer('${esc(v.id_obra)}')">
         <td onclick="event.stopPropagation()"><input type="checkbox" ${STATE.vistorias.selected.has(v.id_obra)?'checked':''} onchange="toggleRowSelection('vistorias','${esc(v.id_obra)}',this.checked)"></td>
@@ -686,6 +725,7 @@ function renderVistorias(container) {
         <td>${esc(v.fiscal)||'—'}</td>
         <td>${formatBRL(v.valor)}</td>
         <td>${statusBadge(v.situacao_os)}</td>
+        ${etapaPrazoSelectCell(v, 'vistorias')}
         <td>${prazoBadge(v)}</td>
         ${docFieldSelectCell(v.id_obra, 'foto', v.foto, 'vistorias')}
         ${docFieldSelectCell(v.id_obra, 'ata', v.ata, 'vistorias')}
@@ -713,7 +753,8 @@ function renderVistorias(container) {
       <select class="filter-select" onchange="STATE.vistorias.filters.foto=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${fotoOpts}</select>
       <select class="filter-select" onchange="STATE.vistorias.filters.ata=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${ataOpts}</select>
       <select class="filter-select" onchange="STATE.vistorias.filters.prazo=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${prazoOpts}</select>
-      ${(f.uf||f.status||f.ciclo||f.search||f.esfera||f.situacao||f.fiscal||f.foto||f.ata||f.prazo) ? `<button class="btn btn-secondary btn-sm" onclick="clearFilters()">✖ Limpar filtros</button>` : ''}
+      <select class="filter-select" onchange="STATE.vistorias.filters.etapa=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${etapaOpts}</select>
+      ${(f.uf||f.status||f.ciclo||f.search||f.esfera||f.situacao||f.fiscal||f.foto||f.ata||f.prazo||f.etapa) ? `<button class="btn btn-secondary btn-sm" onclick="clearFilters()">✖ Limpar filtros</button>` : ''}
     </div>
 
     ${renderBulkBar('vistorias')}
@@ -727,7 +768,7 @@ function renderVistorias(container) {
               <th>UF</th><th>Quem</th><th>Esfera</th><th>Município</th>
               <th>ID da Obra</th><th>Tipologia da Obra</th><th>Situação</th><th>Coordenada</th>
               <th>Escola</th><th>Fiscal</th><th>Valor</th>
-              <th>Situação OS</th><th>Prazo</th><th>Foto</th><th>ATA</th>
+              <th>Situação OS</th><th>Status do Prazo</th><th>Prazo</th><th>Foto</th><th>ATA</th>
               <th>Observação</th><th>Ciclo(s)</th><th>Atualizado</th>
             </tr>
           </thead>
@@ -744,7 +785,7 @@ function renderVistorias(container) {
 }
 
 function clearFilters() {
-  STATE.vistorias.filters = { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'' }
+  STATE.vistorias.filters = { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'', etapa:'' }
   STATE.vistorias.page = 1
   renderVistorias(document.getElementById('content'))
 }
@@ -840,6 +881,13 @@ function openVistoriaDrawer(id) {
             <input class="form-control" type="date" id="e_prazo_data_inicio" value="${esc(v.prazo_data_inicio)}">
           </div>
           <div class="form-group">
+            <label class="form-label">Status do Prazo</label>
+            <select class="form-control" id="e_etapa_prazo">
+              <option value="" ${!v.etapa_prazo?'selected':''}>— Definir —</option>
+              ${ALL_ETAPAS_PRAZO.map(e=>`<option value="${esc(e)}" ${v.etapa_prazo===e?'selected':''}>${esc(e)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group full">
             <label class="form-label">Prazo atual</label>
             <div style="padding:9px 0">${prazoBadge(v)}</div>
           </div>
@@ -947,6 +995,7 @@ function saveVistoriaEdit() {
   v.coordenada  = document.getElementById('e_coordenada').value.trim()
   v.status_pagamento = document.getElementById('e_status_pagamento').value
   v.prazo_data_inicio = document.getElementById('e_prazo_data_inicio').value
+  v.etapa_prazo = document.getElementById('e_etapa_prazo').value
   const fotoOn = document.getElementById('fotoToggle').classList.contains('doc-on')
   const ataOn  = document.getElementById('ataToggle').classList.contains('doc-on')
   v.foto = fotoOn ? (document.getElementById('e_foto').value.trim() || 'sim') : ''
@@ -1722,6 +1771,194 @@ function setStatusPagamento(id, status) {
   DB.saveVistoria(id, v)
   toast('Status de pagamento atualizado.')
   renderPagamentos(document.getElementById('content'))
+}
+
+// ============================================================
+// CONTROLE DE PRAZOS — KPIs, gráficos e calendário
+// ============================================================
+function formatDateBR(iso) {
+  const [y, m, d] = iso.split('-')
+  return `${d}/${m}/${y}`
+}
+
+function prazosChangeMonth(delta) {
+  let { calYear, calMonth } = STATE.prazos
+  calMonth += delta
+  if (calMonth < 0) { calMonth = 11; calYear-- }
+  if (calMonth > 11) { calMonth = 0; calYear++ }
+  STATE.prazos.calYear = calYear
+  STATE.prazos.calMonth = calMonth
+  STATE.prazos.selectedDay = null
+  renderPrazos(document.getElementById('content'))
+}
+
+function prazosGoToday() {
+  const hoje = new Date()
+  STATE.prazos.calYear = hoje.getFullYear()
+  STATE.prazos.calMonth = hoje.getMonth()
+  STATE.prazos.selectedDay = null
+  renderPrazos(document.getElementById('content'))
+}
+
+function selectPrazoDay(key) {
+  STATE.prazos.selectedDay = STATE.prazos.selectedDay === key ? null : key
+  renderPrazos(document.getElementById('content'))
+}
+
+function renderPrazos(container) {
+  const withInfo = Object.values(DB.getVistorias()).map(v => ({ v, info: getPrazoInfo(v) }))
+
+  const counts = { atrasado: 0, proximo: 0, no_prazo: 0, concluido: 0, sem_data: 0 }
+  withInfo.forEach(x => counts[x.info.status]++)
+
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+  if (STATE.prazos.calYear == null) { STATE.prazos.calYear = hoje.getFullYear(); STATE.prazos.calMonth = hoje.getMonth() }
+  const { calYear, calMonth } = STATE.prazos
+
+  const monthStart = new Date(calYear, calMonth, 1)
+  const monthEnd = new Date(calYear, calMonth + 1, 0)
+  const proximoLimite = new Date(hoje); proximoLimite.setDate(proximoLimite.getDate() + 3)
+
+  const byDate = {}
+  let antesDoMes = 0, depoisDoMes = 0
+  withInfo.forEach(x => {
+    if (x.info.status === 'concluido' || x.info.status === 'sem_data') return
+    const dl = x.info.dataLimite
+    if (!dl) return
+    if (dl < monthStart) { antesDoMes++; return }
+    if (dl > monthEnd) { depoisDoMes++; return }
+    const key = dl.toISOString().split('T')[0]
+    byDate[key] = byDate[key] || []
+    byDate[key].push(x)
+  })
+
+  const firstWeekday = monthStart.getDay()
+  const daysInMonth = monthEnd.getDate()
+  const cells = []
+  for (let i = 0; i < firstWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  const todayKey = hoje.toISOString().split('T')[0]
+  const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+
+  const calendarHTML = `
+    <div class="calendar-card">
+      <div class="calendar-header">
+        <button class="btn btn-sm btn-secondary" onclick="prazosChangeMonth(-1)">‹</button>
+        <strong>${monthNames[calMonth]} de ${calYear}</strong>
+        <button class="btn btn-sm btn-secondary" onclick="prazosGoToday()">Hoje</button>
+        <button class="btn btn-sm btn-secondary" onclick="prazosChangeMonth(1)">›</button>
+      </div>
+      ${antesDoMes > 0 ? `<div class="calendar-note">⚠️ ${antesDoMes} obra(s) com prazo vencido antes deste mês</div>` : ''}
+      <div class="calendar-grid">
+        ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d => `<div class="calendar-dow">${d}</div>`).join('')}
+        ${cells.map(d => {
+          if (!d) return `<div class="calendar-cell empty"></div>`
+          const key = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+          const items = byDate[key] || []
+          const cellDate = new Date(calYear, calMonth, d)
+          let sevClass = ''
+          if (items.length > 0) {
+            if (key < todayKey) sevClass = 'has-atrasado'
+            else if (cellDate <= proximoLimite) sevClass = 'has-proximo'
+            else sevClass = 'has-futuro'
+          }
+          return `<div class="calendar-cell ${key===todayKey?'today':''} ${sevClass} ${STATE.prazos.selectedDay===key?'selected':''}" onclick="selectPrazoDay('${key}')">
+            <span class="calendar-daynum">${d}</span>
+            ${items.length ? `<span class="calendar-count">${items.length}</span>` : ''}
+          </div>`
+        }).join('')}
+      </div>
+      ${depoisDoMes > 0 ? `<div class="calendar-note">${depoisDoMes} obra(s) com prazo após este mês</div>` : ''}
+    </div>`
+
+  const selectedList = STATE.prazos.selectedDay ? (byDate[STATE.prazos.selectedDay] || []) : null
+  const selectedPanelHTML = selectedList ? `
+    <div class="calendar-day-panel">
+      <div class="notify-dropdown-header">Prazo em ${formatDateBR(STATE.prazos.selectedDay)} (${selectedList.length})</div>
+      ${selectedList.length === 0 ? `<div class="notify-empty">Nenhuma obra com prazo neste dia.</div>` : selectedList.map(x => `
+        <button class="notify-item" onclick="openVistoriaDrawer('${esc(x.v.id_obra)}')">
+          <div class="notify-item-title">${esc(x.v.escola) || ('Obra #'+x.v.id_obra)}</div>
+          <div class="notify-item-sub">${esc(x.v.municipio)||'—'}/${esc(x.v.uf)||'—'} · ${esc(x.v.etapa_prazo)}</div>
+        </button>`).join('')}
+    </div>` : `
+    <div class="calendar-day-panel">
+      <div class="notify-empty">Clique em um dia do calendário para ver as obras com prazo naquela data.</div>
+    </div>`
+
+  const urgentes = withInfo
+    .filter(x => x.info.status !== 'concluido' && x.info.status !== 'sem_data')
+    .sort((a, b) => a.info.diasRestantes - b.info.diasRestantes)
+    .slice(0, 15)
+
+  const urgentRows = urgentes.length === 0
+    ? `<tr><td colspan="6" style="text-align:center;padding:24px;color:#9ca3af">Nenhuma obra com prazo em aberto.</td></tr>`
+    : urgentes.map(x => `
+      <tr onclick="openVistoriaDrawer('${esc(x.v.id_obra)}')">
+        <td><code style="font-size:11px;color:#6b7280">${esc(x.v.id_obra)}</code></td>
+        <td title="${esc(x.v.escola)}">${esc(x.v.escola)||'—'}</td>
+        <td>${esc(x.v.municipio)||'—'} <span class="badge badge-default">${esc(x.v.uf)}</span></td>
+        <td>${esc(x.v.etapa_prazo)||'—'}</td>
+        <td>${x.info.dataLimite ? formatDateBR(x.info.dataLimite.toISOString().split('T')[0]) : '—'}</td>
+        <td>${prazoBadge(x.v)}</td>
+      </tr>`).join('')
+
+  container.innerHTML = `
+    <div class="page-header"><h2>Controle de Prazos</h2></div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card" style="border-top-color:#ef4444">
+        <div class="kpi-label">Atrasadas</div>
+        <div class="kpi-value" style="${counts.atrasado>0?'color:#ef4444':''}">${counts.atrasado}</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:#f97316">
+        <div class="kpi-label">Próximas do Prazo</div>
+        <div class="kpi-value" style="color:#f97316">${counts.proximo}</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:#10b981">
+        <div class="kpi-label">No Prazo</div>
+        <div class="kpi-value" style="color:#10b981">${counts.no_prazo}</div>
+      </div>
+      <div class="kpi-card" style="border-top-color:#6366f1">
+        <div class="kpi-label">Concluídas</div>
+        <div class="kpi-value" style="color:#6366f1">${counts.concluido}</div>
+        <div class="kpi-sub">${counts.sem_data} sem data/etapa definida</div>
+      </div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <h3>Obras por Etapa do Prazo</h3>
+        <div class="chart-container" style="height:260px"><canvas id="prazoEtapaChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Distribuição por Status do Prazo</h3>
+        <div class="chart-container" style="height:260px"><canvas id="prazoStatusChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="calendar-layout">
+      ${calendarHTML}
+      ${selectedPanelHTML}
+    </div>
+
+    <div class="table-card" style="margin-top:20px">
+      <div class="page-header" style="padding:14px 18px 0">
+        <h3 style="font-size:14px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em">Mais urgentes</h3>
+      </div>
+      <div class="table-wrap">
+        <table class="table-full">
+          <thead><tr><th>ID</th><th>Escola</th><th>Município</th><th>Status do Prazo</th><th>Data Limite</th><th>Prazo</th></tr></thead>
+          <tbody>${urgentRows}</tbody>
+        </table>
+      </div>
+    </div>`
+
+  setTimeout(() => {
+    renderPrazoEtapaChart('prazoEtapaChart')
+    renderPrazoStatusChart('prazoStatusChart')
+  }, 0)
 }
 
 // ============================================================
