@@ -1,11 +1,11 @@
-function importExcel(file, cicloNome) {
+function importExcel(file, cicloNome, prazoDataInicio) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result)
         const wb = XLSX.read(data, { type: 'array' })
-        resolve(processWorkbook(wb, cicloNome))
+        resolve(processWorkbook(wb, cicloNome, prazoDataInicio))
       } catch (err) { reject(err) }
     }
     reader.onerror = () => reject(new Error('Falha ao ler o arquivo'))
@@ -95,7 +95,7 @@ function coordenadaFromLatLon(lat, lon) {
 }
 
 // ─── IMPORTAÇÃO PRINCIPAL ────────────────────────────────────
-function processWorkbook(wb, cicloNome) {
+function processWorkbook(wb, cicloNome, prazoDataInicio) {
   const found = findObrasSheet(wb)
   if (!found) throw new Error('Não encontrei a tabela de obras na planilha (procurei uma linha de cabeçalho com colunas "ID" e "Obra").')
 
@@ -142,6 +142,7 @@ function processWorkbook(wb, cicloNome) {
         obs_lancamento: existing.obs_lancamento || '',
         obs_simec: existing.obs_simec || '',
         status_pagamento: existing.status_pagamento || '',
+        prazo_data_inicio: existing.prazo_data_inicio || prazoDataInicio || '',
         ciclos: [...new Set([...(existing.ciclos || []), cicloNome])],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }
@@ -161,6 +162,7 @@ function processWorkbook(wb, cicloNome) {
         obs_lancamento: '',
         obs_simec: '',
         status_pagamento: '',
+        prazo_data_inicio: prazoDataInicio || '',
         ciclos: [cicloNome],
         ultima_atualizacao: new Date().toISOString().split('T')[0]
       }

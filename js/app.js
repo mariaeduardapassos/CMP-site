@@ -4,7 +4,7 @@
 const STATE = {
   page: 'dashboard',
   dashCiclo: 'all',
-  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'' }, selected: new Set() },
+  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'' }, selected: new Set() },
   fiscais: { search: '', estado: '', municipio: '' },
   pops: { search: '', area: '' },
   simec: { page: 1, perPage: 20, filters: { uf:'', situacao:'', search:'' }, selected: new Set() },
@@ -27,6 +27,7 @@ function doLogin() {
     DB.limparVistoriasOrfas()
     const pg = location.hash.replace('#','') || 'dashboard'
     navigate(pg)
+    notifyPrazoSummary()
   } else {
     err.textContent = 'Usuário ou senha incorretos.'
     err.style.display = 'block'
@@ -75,6 +76,7 @@ function navigate(page) {
   )
   document.getElementById('headerTitle').textContent = PAGE_TITLES[page]
   renderPage()
+  updateNotifyBadge()
 }
 
 function renderPage() {
@@ -105,6 +107,133 @@ const STATUS_MAP = {
 }
 const ALL_STATUSES = Object.keys(STATUS_MAP)
 const ALL_SITUACOES = ['Execução', 'Concluída', 'Paralisada', 'Inacabada', 'Inacabada - PC Técnica Concluída', 'Licitação', 'Contratação', 'Em Reformulação', 'Obra Cancelada']
+
+// ─── CONTROLE DE PRAZOS ──────────────────────────────────────
+// Dia-limite (contado a partir da "Data inicial dos prazos" do ciclo) até
+// quando a obra deveria ter SAÍDO daquela Situação da OS. Tempos padrão
+// extraídos da aba "Dias faltando" da planilha de referência (soma dos
+// dias de cada etapa: organização/localização 12 + prospecção 4 = 16;
+// + documentos 3 = 19; + agendamento 2 = 21; + vistoria 6 = 27;
+// + lançamento 2 = 29; + homologação 1 = 30).
+const PRAZO_DIAS_LIMITE = {
+  '':                      16, // sem status definido = tratado como Não Prospectado
+  'NÃO PROSPECTADO':       16,
+  'AGUARDANDO DOCUMENTOS': 19,
+  'EM AGENDAMENTO':        21,
+  'AGUARDANDO VISTORIA':   27,
+  'VISTORIADO':            29,
+  'LANÇADO':               30,
+  // HOMOLOGADO: concluído, sem prazo. DIFICULDADE: exceção, sem prazo fixo.
+}
+const PRAZO_LABELS = {
+  atrasado:   { label: 'Atrasado',           cls: 'prazo-atrasado' },
+  proximo:    { label: 'Próximo do prazo',   cls: 'prazo-proximo' },
+  no_prazo:   { label: 'No prazo',           cls: 'prazo-no-prazo' },
+  concluido:  { label: 'Concluído',          cls: 'prazo-concluido' },
+  dificuldade:{ label: 'Com dificuldade',    cls: 'prazo-dificuldade' },
+  sem_data:   { label: 'Sem data inicial',   cls: 'prazo-sem-data' },
+}
+
+function getPrazoInfo(v) {
+  if (v.situacao_os === 'HOMOLOGADO') return { status: 'concluido', diasRestantes: null }
+  if (v.situacao_os === 'DIFICULDADE') return { status: 'dificuldade', diasRestantes: null }
+  if (!v.prazo_data_inicio) return { status: 'sem_data', diasRestantes: null }
+
+  const limiteDias = PRAZO_DIAS_LIMITE[v.situacao_os || '']
+  if (limiteDias == null) return { status: 'sem_data', diasRestantes: null }
+
+  const inicio = new Date(v.prazo_data_inicio + 'T00:00:00')
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+  const diasDecorridos = Math.floor((hoje - inicio) / 86400000) + 1
+  const diasRestantes = limiteDias - diasDecorridos
+
+  let status
+  if (diasRestantes < 0) status = 'atrasado'
+  else if (diasRestantes <= 3) status = 'proximo'
+  else status = 'no_prazo'
+  return { status, diasRestantes, limiteDias, diasDecorridos }
+}
+
+function prazoBadge(v) {
+  const info = getPrazoInfo(v)
+  const meta = PRAZO_LABELS[info.status]
+  let texto = meta.label
+  if (info.status === 'atrasado') texto = `Atrasado (${Math.abs(info.diasRestantes)}d)`
+  else if (info.status === 'proximo' || info.status === 'no_prazo') texto = `${info.diasRestantes}d restante(s)`
+  return `<span class="badge ${meta.cls}">${esc(texto)}</span>`
+}
+
+// ─── NOTIFICAÇÕES DE PRAZO (sino no cabeçalho) ──────────────
+function getPrazoAlerts() {
+  return Object.values(DB.getVistorias())
+    .map(v => ({ v, info: getPrazoInfo(v) }))
+    .filter(x => x.info.status === 'atrasado' || x.info.status === 'proximo')
+    .sort((a, b) => (a.info.diasRestantes ?? 0) - (b.info.diasRestantes ?? 0))
+}
+
+function updateNotifyBadge() {
+  const countEl = document.getElementById('notifyCount')
+  if (!countEl) return
+  const alerts = getPrazoAlerts()
+  if (alerts.length > 0) {
+    countEl.textContent = alerts.length > 99 ? '99+' : alerts.length
+    countEl.style.display = 'inline-block'
+  } else {
+    countEl.style.display = 'none'
+  }
+}
+
+function toggleNotifyDropdown() {
+  const dd = document.getElementById('notifyDropdown')
+  if (!dd) return
+  if (dd.style.display !== 'none') { dd.style.display = 'none'; return }
+  renderNotifyDropdown()
+  dd.style.display = 'block'
+}
+
+function hideNotifyDropdown() {
+  const dd = document.getElementById('notifyDropdown')
+  if (dd) dd.style.display = 'none'
+}
+
+document.addEventListener('click', (e) => {
+  const wrap = document.querySelector('.header-notify')
+  if (wrap && !wrap.contains(e.target)) hideNotifyDropdown()
+})
+
+function renderNotifyDropdown() {
+  const dd = document.getElementById('notifyDropdown')
+  if (!dd) return
+  updateNotifyBadge()
+  const alerts = getPrazoAlerts()
+  if (alerts.length === 0) {
+    dd.innerHTML = `<div class="notify-dropdown-header">Prazos</div><div class="notify-empty">Nenhuma obra atrasada ou perto do prazo. 🎉</div>`
+    return
+  }
+  const atrasadas = alerts.filter(a => a.info.status === 'atrasado').length
+  const proximas  = alerts.length - atrasadas
+  dd.innerHTML = `
+    <div class="notify-dropdown-header">${atrasadas} atrasada(s) · ${proximas} próxima(s) do prazo</div>
+    ${alerts.slice(0, 30).map(a => `
+      <button class="notify-item" onclick="hideNotifyDropdown();openVistoriaDrawer('${esc(a.v.id_obra)}')">
+        <div class="notify-item-title">${esc(a.v.escola) || ('Obra #'+a.v.id_obra)}</div>
+        <div class="notify-item-sub">${esc(a.v.municipio)||'—'}/${esc(a.v.uf)||'—'} · ${esc(a.v.situacao_os)||'sem status'} ·
+          ${a.info.status === 'atrasado' ? `atrasado ${Math.abs(a.info.diasRestantes)}d` : `${a.info.diasRestantes}d restante(s)`}</div>
+      </button>`).join('')}
+    ${alerts.length > 30 ? `<div class="notify-empty">+ ${alerts.length-30} outra(s)</div>` : ''}`
+}
+
+function notifyPrazoSummary() {
+  const alerts = getPrazoAlerts()
+  updateNotifyBadge()
+  if (alerts.length === 0) return
+  const atrasadas = alerts.filter(a => a.info.status === 'atrasado').length
+  const proximas  = alerts.length - atrasadas
+  const partes = []
+  if (atrasadas > 0) partes.push(`${atrasadas} obra(s) atrasada(s)`)
+  if (proximas > 0) partes.push(`${proximas} próxima(s) do prazo`)
+  toast(`⏰ ${partes.join(' e ')}. Veja o sino de notificações.`, atrasadas > 0 ? 'error' : 'success')
+}
 
 function statusBadge(status) {
   const cls = STATUS_MAP[status] || 'default'
@@ -490,6 +619,7 @@ function renderVistorias(container) {
   if (f.foto === 'nao') data = data.filter(v => !v.foto)
   if (f.ata  === 'sim') data = data.filter(v => v.ata)
   if (f.ata  === 'nao') data = data.filter(v => !v.ata)
+  if (f.prazo) data = data.filter(v => getPrazoInfo(v).status === f.prazo)
   if (f.search) {
     const q = f.search.toLowerCase()
     data = data.filter(v =>
@@ -533,12 +663,14 @@ function renderVistorias(container) {
   const ataOpts = `<option value="" ${f.ata===''?'selected':''}>ATA (todos)</option>
     <option value="sim" ${f.ata==='sim'?'selected':''}>✅ Com ATA</option>
     <option value="nao" ${f.ata==='nao'?'selected':''}>— Sem ATA</option>`
+  const prazoOpts = `<option value="">Prazo (todos)</option>` +
+    Object.keys(PRAZO_LABELS).map(k => `<option value="${k}" ${f.prazo===k?'selected':''}>${PRAZO_LABELS[k].label}</option>`).join('')
 
   const pageIds = pageData.map(v => v.id_obra)
   const allVisibleSelected = pageIds.length > 0 && pageIds.every(id => STATE.vistorias.selected.has(id))
 
   const rows = pageData.length === 0
-    ? `<tr><td colspan="18" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
+    ? `<tr><td colspan="19" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
     : pageData.map(v => `
       <tr onclick="openVistoriaDrawer('${esc(v.id_obra)}')">
         <td onclick="event.stopPropagation()"><input type="checkbox" ${STATE.vistorias.selected.has(v.id_obra)?'checked':''} onchange="toggleRowSelection('vistorias','${esc(v.id_obra)}',this.checked)"></td>
@@ -554,6 +686,7 @@ function renderVistorias(container) {
         <td>${esc(v.fiscal)||'—'}</td>
         <td>${formatBRL(v.valor)}</td>
         <td>${statusBadge(v.situacao_os)}</td>
+        <td>${prazoBadge(v)}</td>
         ${docFieldSelectCell(v.id_obra, 'foto', v.foto, 'vistorias')}
         ${docFieldSelectCell(v.id_obra, 'ata', v.ata, 'vistorias')}
         <td title="${esc(v.observacao)}">${v.observacao ? esc(v.observacao).substring(0,30)+'…' : '—'}</td>
@@ -579,7 +712,8 @@ function renderVistorias(container) {
       <select class="filter-select" onchange="STATE.vistorias.filters.fiscal=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${fiscOpts}</select>
       <select class="filter-select" onchange="STATE.vistorias.filters.foto=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${fotoOpts}</select>
       <select class="filter-select" onchange="STATE.vistorias.filters.ata=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${ataOpts}</select>
-      ${(f.uf||f.status||f.ciclo||f.search||f.esfera||f.situacao||f.fiscal||f.foto||f.ata) ? `<button class="btn btn-secondary btn-sm" onclick="clearFilters()">✖ Limpar filtros</button>` : ''}
+      <select class="filter-select" onchange="STATE.vistorias.filters.prazo=this.value;STATE.vistorias.page=1;renderVistorias(document.getElementById('content'))">${prazoOpts}</select>
+      ${(f.uf||f.status||f.ciclo||f.search||f.esfera||f.situacao||f.fiscal||f.foto||f.ata||f.prazo) ? `<button class="btn btn-secondary btn-sm" onclick="clearFilters()">✖ Limpar filtros</button>` : ''}
     </div>
 
     ${renderBulkBar('vistorias')}
@@ -593,7 +727,7 @@ function renderVistorias(container) {
               <th>UF</th><th>Quem</th><th>Esfera</th><th>Município</th>
               <th>ID da Obra</th><th>Tipologia da Obra</th><th>Situação</th><th>Coordenada</th>
               <th>Escola</th><th>Fiscal</th><th>Valor</th>
-              <th>Situação OS</th><th>Foto</th><th>ATA</th>
+              <th>Situação OS</th><th>Prazo</th><th>Foto</th><th>ATA</th>
               <th>Observação</th><th>Ciclo(s)</th><th>Atualizado</th>
             </tr>
           </thead>
@@ -610,7 +744,7 @@ function renderVistorias(container) {
 }
 
 function clearFilters() {
-  STATE.vistorias.filters = { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'' }
+  STATE.vistorias.filters = { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'', prazo:'' }
   STATE.vistorias.page = 1
   renderVistorias(document.getElementById('content'))
 }
@@ -698,6 +832,16 @@ function openVistoriaDrawer(id) {
             <select class="form-control" id="e_situacao_os" style="border-color:var(--accent)">
               ${statusOptions(v.situacao_os)}
             </select>
+          </div>
+        </div>
+        <div class="edit-grid" style="margin-top:12px">
+          <div class="form-group">
+            <label class="form-label">Data de Início do Prazo</label>
+            <input class="form-control" type="date" id="e_prazo_data_inicio" value="${esc(v.prazo_data_inicio)}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Prazo atual</label>
+            <div style="padding:9px 0">${prazoBadge(v)}</div>
           </div>
         </div>
       </div>
@@ -802,6 +946,7 @@ function saveVistoriaEdit() {
   v.valor       = document.getElementById('e_valor').value.trim()
   v.coordenada  = document.getElementById('e_coordenada').value.trim()
   v.status_pagamento = document.getElementById('e_status_pagamento').value
+  v.prazo_data_inicio = document.getElementById('e_prazo_data_inicio').value
   const fotoOn = document.getElementById('fotoToggle').classList.contains('doc-on')
   const ataOn  = document.getElementById('ataToggle').classList.contains('doc-on')
   v.foto = fotoOn ? (document.getElementById('e_foto').value.trim() || 'sim') : ''
@@ -1136,9 +1281,18 @@ function renderImport(container) {
       <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" onchange="handleFileSelect(this.files[0])">
       <div id="importForm" style="display:none">
         <div class="separator"></div>
-        <div class="form-group" style="max-width:320px">
-          <label class="form-label">Nome do Ciclo *</label>
-          <input class="form-control" id="cicloNome" placeholder="Ex: 9º Ciclo">
+        <div class="edit-grid" style="max-width:520px">
+          <div class="form-group">
+            <label class="form-label">Nome do Ciclo *</label>
+            <input class="form-control" id="cicloNome" placeholder="Ex: 9º Ciclo">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data inicial dos prazos *</label>
+            <input class="form-control" type="date" id="prazoDataInicio" value="${new Date().toISOString().split('T')[0]}">
+          </div>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin:-6px 0 12px">
+          A partir dessa data começa a contar o prazo de cada obra deste ciclo (ver controle de prazos na aba Vistorias).
         </div>
         <div id="previewSection"></div>
         <div style="display:flex;gap:10px;margin-top:18px">
@@ -1215,12 +1369,14 @@ async function handleFileSelect(file) {
 async function confirmImport() {
   const file = STATE.importFile
   const cicloNome = (document.getElementById('cicloNome').value||'').trim()
+  const prazoDataInicio = document.getElementById('prazoDataInicio').value
   if (!file) { toast('Selecione um arquivo', 'error'); return }
   if (!cicloNome) { toast('Informe o nome do ciclo', 'error'); return }
+  if (!prazoDataInicio) { toast('Informe a data inicial dos prazos', 'error'); return }
   const btn = document.getElementById('importBtn')
   btn.disabled = true; btn.textContent = '⏳ Importando...'
   try {
-    const r = await importExcel(file, cicloNome)
+    const r = await importExcel(file, cicloNome, prazoDataInicio)
     document.getElementById('importResult').innerHTML = `
       <div class="alert alert-success" style="margin-top:16px">
         ✅ <strong>${esc(cicloNome)} importado!</strong><br>
@@ -1590,6 +1746,7 @@ if (DB.isLoggedIn()) {
   document.getElementById('loginOverlay').style.display = 'none'
   DB.limparVistoriasOrfas()
   navigate(location.hash.replace('#','') || 'dashboard')
+  notifyPrazoSummary()
 } else {
   document.getElementById('loginOverlay').style.display = 'flex'
   setTimeout(() => document.getElementById('loginUser').focus(), 100)
