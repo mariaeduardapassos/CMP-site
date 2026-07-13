@@ -4,11 +4,11 @@
 const STATE = {
   page: 'dashboard',
   dashCiclo: 'all',
-  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'' } },
+  vistorias: { page: 1, perPage: 20, filters: { uf:'', status:'', ciclo:'', search:'', esfera:'', fiscal:'', foto:'', ata:'', situacao:'' }, selected: new Set() },
   fiscais: { search: '', estado: '', municipio: '' },
   pops: { search: '', area: '' },
-  simec: { page: 1, perPage: 20, filters: { uf:'', situacao:'', search:'' } },
-  pagamentos: { filters: { uf:'', status:'', search:'' } },
+  simec: { page: 1, perPage: 20, filters: { uf:'', situacao:'', search:'' }, selected: new Set() },
+  pagamentos: { filters: { uf:'', status:'', search:'' }, selected: new Set() },
   importFile: null,
   editingVistoriaId: null,
   editingFiscalId: null,
@@ -201,6 +201,133 @@ function setDocFieldInline(id, field, value, page) {
   toast(`${lbl ? lbl.on.replace(' registrada','').replace(' registrado','') : field} ${value ? 'marcado' : 'desmarcado'}.`)
   if (page === 'vistorias') renderVistorias(document.getElementById('content'))
   else if (page === 'simec') renderSimec(document.getElementById('content'))
+}
+
+// ============================================================
+// SELEÇÃO EM MASSA (checkbox por linha + editar/excluir várias de uma vez)
+// ============================================================
+// Cada página com essa funcionalidade define seus próprios campos
+// editáveis em massa; a exclusão em massa só existe onde "excluir a
+// linha" tem um significado único e claro (a própria obra), evitando
+// apagar uma obra inteira sem querer a partir de uma tela de controle.
+const BULK_FIELDS = {
+  vistorias: [
+    { key: 'situacao',         label: 'Situação da Obra',    type: 'select', options: () => ALL_SITUACOES },
+    { key: 'situacao_os',      label: 'Situação da OS',      type: 'select', options: () => ALL_STATUSES },
+    { key: 'esfera',           label: 'Esfera',              type: 'select', options: () => ['Municipal','Estadual','Federal'] },
+    { key: 'fiscal',           label: 'Fiscal',              type: 'text' },
+    { key: 'quem',             label: 'Quem',                type: 'text' },
+    { key: 'status_pagamento', label: 'Status de Pagamento', type: 'select', options: () => ['Pago','Não Pago','A Negociar'] },
+  ],
+  simec: [
+    { key: 'vistoriador',      label: 'Vistoriador',            type: 'text' },
+    { key: 'foto',             label: 'Foto',                    type: 'select', options: () => ['sim'], boolLike: true },
+    { key: 'ata',              label: 'ATA',                     type: 'select', options: () => ['sim'], boolLike: true },
+    { key: 'memorial_calculo', label: 'Memorial de Cálculo',     type: 'select', options: () => ['sim'], boolLike: true },
+  ],
+  pagamentos: [
+    { key: 'status_pagamento', label: 'Status de Pagamento', type: 'select', options: () => ['Pago','Não Pago','A Negociar'] },
+  ],
+}
+const BULK_ALLOW_DELETE = { vistorias: true, simec: false, pagamentos: false }
+
+function rerenderBulkPage(page) {
+  const c = document.getElementById('content')
+  if (page === 'vistorias') renderVistorias(c)
+  else if (page === 'simec') renderSimec(c)
+  else if (page === 'pagamentos') renderPagamentos(c)
+}
+
+function toggleRowSelection(page, id, checked) {
+  const sel = STATE[page].selected
+  if (checked) sel.add(id); else sel.delete(id)
+  rerenderBulkPage(page)
+}
+
+function toggleSelectAllVisible(page, checkbox, ids) {
+  const sel = STATE[page].selected
+  if (checkbox.checked) ids.forEach(id => sel.add(id))
+  else ids.forEach(id => sel.delete(id))
+  rerenderBulkPage(page)
+}
+
+function clearSelection(page) {
+  STATE[page].selected.clear()
+  rerenderBulkPage(page)
+}
+
+function renderBulkBar(page) {
+  const sel = STATE[page].selected
+  if (!sel || sel.size === 0) return ''
+  const fields = BULK_FIELDS[page] || []
+  const fieldOpts = fields.map(f => `<option value="${esc(f.key)}">${esc(f.label)}</option>`).join('')
+  return `
+    <div class="bulk-bar">
+      <strong>${sel.size} selecionada(s)</strong>
+      <select class="filter-select" id="bulkField" onchange="renderBulkValueWidget('${page}')">${fieldOpts}</select>
+      <span id="bulkValueWrap"></span>
+      <button class="btn btn-primary btn-sm" onclick="applyBulkEdit('${page}')">Aplicar às selecionadas</button>
+      ${BULK_ALLOW_DELETE[page] ? `<button class="btn btn-danger btn-sm" onclick="bulkDeleteSelected('${page}')">🗑️ Excluir selecionadas</button>` : ''}
+      <button class="btn btn-secondary btn-sm" onclick="clearSelection('${page}')">✖ Limpar seleção</button>
+    </div>`
+}
+
+function renderBulkValueWidget(page) {
+  const fieldSel = document.getElementById('bulkField')
+  const wrap = document.getElementById('bulkValueWrap')
+  if (!fieldSel || !wrap) return
+  const fields = BULK_FIELDS[page] || []
+  const f = fields.find(x => x.key === fieldSel.value)
+  if (!f) { wrap.innerHTML = ''; return }
+  if (f.boolLike) {
+    wrap.innerHTML = `<select class="filter-select" id="bulkValue">
+      <option value="sim">✅ Marcar como registrado</option>
+      <option value="">— Desmarcar</option>
+    </select>`
+  } else if (f.type === 'select') {
+    const opts = f.options()
+    wrap.innerHTML = `<select class="filter-select" id="bulkValue">
+      <option value="">— Selecione —</option>
+      ${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}
+    </select>`
+  } else {
+    wrap.innerHTML = `<input class="form-control" id="bulkValue" style="width:200px" placeholder="Novo valor">`
+  }
+}
+
+function applyBulkEdit(page) {
+  const sel = STATE[page].selected
+  if (!sel || sel.size === 0) return
+  const fieldSel = document.getElementById('bulkField')
+  const fields = BULK_FIELDS[page] || []
+  const f = fields.find(x => x.key === fieldSel.value)
+  if (!f) return
+  const valueEl = document.getElementById('bulkValue')
+  const value = valueEl ? valueEl.value : ''
+  if (f.type === 'select' && !value && !f.boolLike) { toast('Selecione um valor.', 'error'); return }
+  if (!confirm(`Alterar "${f.label}" para "${value || '(vazio)'}" em ${sel.size} obra(s)?`)) return
+
+  sel.forEach(id => {
+    const v = DB.getVistoria(id)
+    if (!v) return
+    v[f.key] = value
+    v.ultima_atualizacao = new Date().toISOString().split('T')[0]
+    DB.saveVistoria(id, v)
+  })
+  toast(`${sel.size} obra(s) atualizada(s).`)
+  rerenderBulkPage(page)
+}
+
+function bulkDeleteSelected(page) {
+  const sel = STATE[page].selected
+  if (!sel || sel.size === 0) return
+  if (!confirm(`Excluir ${sel.size} obra(s) selecionada(s) permanentemente? Essa ação não pode ser desfeita.`)) return
+  const all = DB.getVistorias()
+  sel.forEach(id => delete all[id])
+  DB.saveVistorias(all)
+  sel.clear()
+  toast('Obras excluídas.')
+  rerenderBulkPage(page)
 }
 
 function statusOptions(current) {
@@ -407,10 +534,14 @@ function renderVistorias(container) {
     <option value="sim" ${f.ata==='sim'?'selected':''}>✅ Com ATA</option>
     <option value="nao" ${f.ata==='nao'?'selected':''}>— Sem ATA</option>`
 
+  const pageIds = pageData.map(v => v.id_obra)
+  const allVisibleSelected = pageIds.length > 0 && pageIds.every(id => STATE.vistorias.selected.has(id))
+
   const rows = pageData.length === 0
-    ? `<tr><td colspan="17" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
+    ? `<tr><td colspan="18" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria encontrada</td></tr>`
     : pageData.map(v => `
       <tr onclick="openVistoriaDrawer('${esc(v.id_obra)}')">
+        <td onclick="event.stopPropagation()"><input type="checkbox" ${STATE.vistorias.selected.has(v.id_obra)?'checked':''} onchange="toggleRowSelection('vistorias','${esc(v.id_obra)}',this.checked)"></td>
         <td><span class="badge badge-default">${esc(v.uf)}</span></td>
         <td>${esc(v.quem)||'—'}</td>
         <td>${esc(v.esfera)||'—'}</td>
@@ -451,11 +582,14 @@ function renderVistorias(container) {
       ${(f.uf||f.status||f.ciclo||f.search||f.esfera||f.situacao||f.fiscal||f.foto||f.ata) ? `<button class="btn btn-secondary btn-sm" onclick="clearFilters()">✖ Limpar filtros</button>` : ''}
     </div>
 
+    ${renderBulkBar('vistorias')}
+
     <div class="table-card">
       <div class="table-wrap">
         <table class="table-full">
           <thead>
             <tr>
+              <th><input type="checkbox" ${allVisibleSelected?'checked':''} onchange='toggleSelectAllVisible("vistorias",this,${JSON.stringify(pageIds)})'></th>
               <th>UF</th><th>Quem</th><th>Esfera</th><th>Município</th>
               <th>ID da Obra</th><th>Tipologia da Obra</th><th>Situação</th><th>Coordenada</th>
               <th>Escola</th><th>Fiscal</th><th>Valor</th>
@@ -471,6 +605,8 @@ function renderVistorias(container) {
         <div class="pagination-btns">${buildPagination(page, maxPage)}</div>
       </div>
     </div>`
+
+  if (STATE.vistorias.selected.size > 0) setTimeout(() => renderBulkValueWidget('vistorias'), 0)
 }
 
 function clearFilters() {
@@ -1136,10 +1272,14 @@ function renderSimec(container) {
   const sitOpts = `<option value="">Todas as situações</option>` +
     ALL_SITUACOES.map(s => `<option value="${esc(s)}" ${f.situacao===s?'selected':''}>${esc(s)}</option>`).join('')
 
+  const pageIds = pageData.map(v => v.id_obra)
+  const allVisibleSelected = pageIds.length > 0 && pageIds.every(id => STATE.simec.selected.has(id))
+
   const rows = pageData.length === 0
-    ? `<tr><td colspan="12" style="text-align:center;padding:32px;color:#9ca3af">Nenhum registro encontrado</td></tr>`
+    ? `<tr><td colspan="13" style="text-align:center;padding:32px;color:#9ca3af">Nenhum registro encontrado</td></tr>`
     : pageData.map(v => `
       <tr onclick="openSimecDrawer('${esc(v.id_obra)}')">
+        <td onclick="event.stopPropagation()"><input type="checkbox" ${STATE.simec.selected.has(v.id_obra)?'checked':''} onchange="toggleRowSelection('simec','${esc(v.id_obra)}',this.checked)"></td>
         <td>${esc(v.uf)||'—'}</td>
         <td>${esc(v.esfera)||'—'}</td>
         <td>${esc(v.municipio)||'—'}</td>
@@ -1166,11 +1306,15 @@ function renderSimec(container) {
       <select class="filter-select" onchange="STATE.simec.filters.situacao=this.value;STATE.simec.page=1;renderSimec(document.getElementById('content'))">${sitOpts}</select>
       ${(f.uf||f.situacao||f.search) ? `<button class="btn btn-secondary btn-sm" onclick="STATE.simec.filters={uf:'',situacao:'',search:''};STATE.simec.page=1;renderSimec(document.getElementById('content'))">✖ Limpar filtros</button>` : ''}
     </div>
+
+    ${renderBulkBar('simec')}
+
     <div class="table-card">
       <div class="table-wrap">
         <table class="table-full">
           <thead>
             <tr>
+              <th><input type="checkbox" ${allVisibleSelected?'checked':''} onchange='toggleSelectAllVisible("simec",this,${JSON.stringify(pageIds)})'></th>
               <th>UF</th><th>Esfera</th><th>Município</th><th>ID da Obra</th><th>Escola</th><th>Tipologia da Obra</th><th>Situação</th>
               <th>Foto</th><th>ATA</th><th>Memorial de Cálculo</th><th>Vistoriador</th><th>Obs. CMP</th>
             </tr>
@@ -1186,6 +1330,8 @@ function renderSimec(container) {
     <div style="font-size:12px;color:#9ca3af;margin-top:10px">
       UF, Município, Tipologia e Situação vêm direto da aba Vistorias — para alterá-los, edite a obra em Vistorias. Foto, ATA e os demais campos do SIMEC podem ser editados aqui e refletem automaticamente na aba Vistorias (é o mesmo registro).
     </div>`
+
+  if (STATE.simec.selected.size > 0) setTimeout(() => renderBulkValueWidget('simec'), 0)
 }
 
 function changeSimecPage(p) { STATE.simec.page=p; renderSimec(document.getElementById('content')) }
@@ -1358,10 +1504,14 @@ function renderPagamentos(container) {
     return sum + (isNaN(n)?0:n)
   }, 0)
 
+  const pageIds = data.map(v => v.id_obra)
+  const allVisibleSelected = pageIds.length > 0 && pageIds.every(id => STATE.pagamentos.selected.has(id))
+
   const rows = data.length === 0
-    ? `<tr><td colspan="6" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria com fiscal atribuído encontrada</td></tr>`
+    ? `<tr><td colspan="7" style="text-align:center;padding:32px;color:#9ca3af">Nenhuma vistoria com fiscal atribuído encontrada</td></tr>`
     : data.map(v => `
       <tr>
+        <td onclick="event.stopPropagation()"><input type="checkbox" ${STATE.pagamentos.selected.has(v.id_obra)?'checked':''} onchange="toggleRowSelection('pagamentos','${esc(v.id_obra)}',this.checked)"></td>
         <td><code style="font-size:11px;color:#6b7280">${esc(v.id_obra)}</code></td>
         <td>${esc(v.municipio)||'—'} <span class="badge badge-default">${esc(v.uf)}</span></td>
         <td>${esc(v.fiscal)}</td>
@@ -1387,10 +1537,16 @@ function renderPagamentos(container) {
       <select class="filter-select" onchange="STATE.pagamentos.filters.status=this.value;renderPagamentos(document.getElementById('content'))">${stOpts}</select>
       ${(f.uf||f.status||f.search) ? `<button class="btn btn-secondary btn-sm" onclick="STATE.pagamentos.filters={uf:'',status:'',search:''};renderPagamentos(document.getElementById('content'))">✖ Limpar filtros</button>` : ''}
     </div>
+
+    ${renderBulkBar('pagamentos')}
+
     <div class="table-card">
       <div class="table-wrap">
         <table class="table-full">
-          <thead><tr><th>ID</th><th>Município</th><th>Nome do Fiscal</th><th>Valor</th><th>Status de Pagamento</th><th>Ações</th></tr></thead>
+          <thead><tr>
+            <th><input type="checkbox" ${allVisibleSelected?'checked':''} onchange='toggleSelectAllVisible("pagamentos",this,${JSON.stringify(pageIds)})'></th>
+            <th>ID</th><th>Município</th><th>Nome do Fiscal</th><th>Valor</th><th>Status de Pagamento</th><th>Ações</th>
+          </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1398,6 +1554,8 @@ function renderPagamentos(container) {
     <div style="font-size:12px;color:#9ca3af;margin-top:10px">
       Município, fiscal e valor vêm direto da aba Vistorias — para alterá-los, edite a obra em Vistorias. O status de pagamento pode ser definido aqui e reflete automaticamente lá (é o mesmo registro).
     </div>`
+
+  if (STATE.pagamentos.selected.size > 0) setTimeout(() => renderBulkValueWidget('pagamentos'), 0)
 }
 
 function setStatusPagamento(id, status) {
