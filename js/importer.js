@@ -117,7 +117,6 @@ function processWorkbook(wb, cicloNome) {
     const baseData = {
       id_obra: id,
       uf,
-      quem: unidade,
       esfera: classificarEsfera(unidade),
       municipio,
       tipologia: String(row['Tipologia'] || '').trim(),
@@ -131,6 +130,7 @@ function processWorkbook(wb, cicloNome) {
       vistorias[id] = {
         ...existing,
         ...baseData,
+        quem: existing.quem || '',
         fiscal: existing.fiscal || '',
         valor: existing.valor || '',
         situacao_os: existing.situacao_os || '',
@@ -149,6 +149,7 @@ function processWorkbook(wb, cicloNome) {
     } else {
       vistorias[id] = {
         ...baseData,
+        quem: '',
         fiscal: '',
         valor: '',
         situacao_os: '',
