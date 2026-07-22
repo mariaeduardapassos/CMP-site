@@ -45,7 +45,7 @@ const DB = {
     CACHE.fiscais = f.data || []
     CACHE.pops = p.data || []
     CACHE.precos = {}
-    ;(pr.data || []).forEach(row => { CACHE.precos[row.uf] = { valorMinimo: row.valor_minimo || '', observacao: row.observacao || '' } })
+    ;(pr.data || []).forEach(row => { CACHE.precos[row.uf] = { valorMinimo: row.valor_minimo || '', observacao: row.observacao || '', ativo: row.ativo } })
     CACHE.ready = true
 
     this._subscribeRealtime()
@@ -92,7 +92,7 @@ const DB = {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'precos' }, (payload) => {
         if (payload.eventType === 'DELETE') delete CACHE.precos[payload.old.uf]
-        else CACHE.precos[payload.new.uf] = { valorMinimo: payload.new.valor_minimo || '', observacao: payload.new.observacao || '' }
+        else CACHE.precos[payload.new.uf] = { valorMinimo: payload.new.valor_minimo || '', observacao: payload.new.observacao || '', ativo: payload.new.ativo }
         scheduleRerender()
       })
       .subscribe()
@@ -214,7 +214,12 @@ const DB = {
   savePreco(uf, data) {
     CACHE.precos[uf] = { ...(CACHE.precos[uf] || {}), ...data }
     const merged = CACHE.precos[uf]
-    supabaseClient.from('precos').upsert({ uf, valor_minimo: merged.valorMinimo || '', observacao: merged.observacao || '' })
+    const row = { uf, valor_minimo: merged.valorMinimo || '', observacao: merged.observacao || '' }
+    // Só envia "ativo" quando ele já foi definido alguma vez, para que a
+    // edição de valor/observação continue funcionando mesmo antes da coluna
+    // "ativo" existir na tabela do Supabase.
+    if (merged.ativo !== undefined) row.ativo = merged.ativo
+    supabaseClient.from('precos').upsert(row)
       .then(({ error }) => { if (error) this._reportError('Falha ao salvar o preço', error) })
   },
 

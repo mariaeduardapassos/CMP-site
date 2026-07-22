@@ -118,14 +118,14 @@ function renderPage() {
 // UTILITIES
 // ============================================================
 const STATUS_MAP = {
-  'AGUARDANDO DOCUMENTOS': 'aguardando-documentos',
-  'AGUARDANDO VISTORIA':   'aguardando-vistoria',
-  'DIFICULDADE':           'dificuldade',
-  'EM AGENDAMENTO':        'em-agendamento',
-  'HOMOLOGADO':            'homologado',
-  'LANÇADO':               'lancado',
   'NÃO PROSPECTADO':       'nao-prospectado',
+  'EM AGENDAMENTO':        'em-agendamento',
+  'AGUARDANDO VISTORIA':   'aguardando-vistoria',
   'VISTORIADO':            'vistoriado',
+  'AGUARDANDO DOCUMENTOS': 'aguardando-documentos',
+  'LANÇADO':               'lancado',
+  'HOMOLOGADO':            'homologado',
+  'DIFICULDADE':           'dificuldade',
 }
 const ALL_STATUSES = Object.keys(STATUS_MAP)
 const ALL_SITUACOES = ['Execução', 'Concluída', 'Paralisada', 'Inacabada', 'Inacabada - PC Técnica Concluída', 'Licitação', 'Contratação', 'Em Reformulação', 'Obra Cancelada']
@@ -1661,12 +1661,22 @@ function saveSimecEdit() {
 function renderPrecos(container) {
   const precos = DB.getPrecos()
   const ufs = Object.keys(STATE_CENTROIDS).sort()
+  // Estado "atualmente ativo" = tem pelo menos uma obra cadastrada. Só serve
+  // de valor padrão para estados que nunca tiveram o campo "ativo" definido
+  // manualmente — depois de editado, o que foi escolhido no site prevalece.
+  const ufsComObra = new Set(Object.values(DB.getVistorias()).map(v => v.uf).filter(Boolean))
 
   const rows = ufs.map(uf => {
     const p = precos[uf] || {}
+    const ativo = p.ativo !== undefined ? !!p.ativo : ufsComObra.has(uf)
     return `
-      <tr>
-        <td><span class="badge badge-default">${uf}</span> ${esc(STATE_CENTROIDS[uf].name)}</td>
+      <tr style="${ativo ? '' : 'opacity:.5'}">
+        <td>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+            <input type="checkbox" ${ativo ? 'checked' : ''} onchange="toggleEstadoAtivo('${uf}', this.checked)" title="${ativo ? 'Ativo' : 'Inativo'}">
+            <span class="badge badge-default">${uf}</span> ${esc(STATE_CENTROIDS[uf].name)}
+          </label>
+        </td>
         <td><input class="form-control" style="max-width:160px" value="${esc(p.valorMinimo ? formatBRL(p.valorMinimo) : '')}" placeholder="R$ 0,00"
               onblur="formatValorInput(this);savePrecoField('${uf}','valorMinimo',this.value)"></td>
         <td><input class="form-control" value="${esc(p.observacao)}" placeholder="Observação (opcional)"
@@ -1679,7 +1689,7 @@ function renderPrecos(container) {
       <h2>Preços das Vistorias</h2>
     </div>
     <div style="font-size:12px;color:#9ca3af;margin-bottom:12px">
-      Valor mínimo que pode ser cobrado por vistoria em cada estado. Preencha o campo e clique fora para salvar.
+      Valor mínimo que pode ser cobrado por vistoria em cada estado. Marque a caixa ao lado do estado para ativá-lo ou desativá-lo. Preencha o campo e clique fora para salvar.
     </div>
     <div class="table-card">
       <div class="table-wrap">
@@ -1694,6 +1704,11 @@ function renderPrecos(container) {
 function savePrecoField(uf, field, value) {
   DB.savePreco(uf, { [field]: value.trim() })
   toast(`Preço mínimo de ${uf} atualizado.`)
+}
+
+function toggleEstadoAtivo(uf, ativo) {
+  DB.savePreco(uf, { ativo })
+  toast(`${STATE_CENTROIDS[uf].name} marcado como ${ativo ? 'ativo' : 'inativo'}.`)
 }
 
 // ============================================================
