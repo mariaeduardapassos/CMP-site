@@ -1068,6 +1068,7 @@ function renderFiscais(container) {
     <div class="page-header">
       <h2>Fiscais <span style="font-weight:400;color:#9ca3af;font-size:14px">(${DB.getFiscais().length})</span></h2>
       <div style="display:flex;gap:8px">
+        ${DB.getFiscais().length > 0 ? `<button class="btn btn-danger" onclick="confirmDeleteAllFiscais()">🗑️ Apagar Importação</button>` : ''}
         <button class="btn btn-secondary" onclick="importFiscaisFromFile()">📥 Importar da Planilha</button>
         <button class="btn btn-primary" onclick="openFiscalDrawer(null)">+ Novo Fiscal</button>
       </div>
@@ -1174,6 +1175,15 @@ function confirmDeleteFiscal(id, nome) {
   DB.deleteFiscal(id)
   renderFiscais(document.getElementById('content'))
   toast('Fiscal removido.')
+}
+
+function confirmDeleteAllFiscais() {
+  const total = DB.getFiscais().length
+  if (total === 0) return
+  if (!confirm(`Excluir todos os ${total} fiscais cadastrados/importados? Essa ação não pode ser desfeita.`)) return
+  DB.deleteAllFiscais()
+  renderFiscais(document.getElementById('content'))
+  toast('Todos os fiscais foram excluídos.')
 }
 
 // ─── IMPORT FISCAIS (standalone from Fiscais page) ──────────

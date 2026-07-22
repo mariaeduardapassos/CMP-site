@@ -187,6 +187,11 @@ const DB = {
     CACHE.fiscais = CACHE.fiscais.filter(f => f.id !== id)
     supabaseClient.from('fiscais').delete().eq('id', id).then(({ error }) => { if (error) this._reportError('Falha ao excluir o fiscal', error) })
   },
+  deleteAllFiscais() {
+    const ids = CACHE.fiscais.map(f => f.id)
+    CACHE.fiscais = []
+    if (ids.length) supabaseClient.from('fiscais').delete().in('id', ids).then(({ error }) => { if (error) this._reportError('Falha ao excluir os fiscais', error) })
+  },
 
   // POPS — Procedimentos Operacionais Padrão
   getPops() { return _clone(CACHE.pops) },
